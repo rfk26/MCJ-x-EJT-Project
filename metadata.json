@@ -1,0 +1,6 @@
+{
+  "name": "Mandiri Cipta Jaya Expense Tracker",
+  "description": "Pelacak pengeluaran proyek, pendapatan, anggaran, dan pelaporan real-time untuk CV. Mandiri Cipta Jaya.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

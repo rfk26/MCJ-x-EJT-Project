@@ -1,0 +1,1052 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import React from "react";
+import { Project, Transaction, Category, ProjectStatus } from "../types";
+import { COMPANY_INFO } from "../data";
+import { Plus, ListFilter, Search, FileText, ShoppingBag, Trash2, HelpCircle, AlertTriangle, ShieldCheck, Landmark, Briefcase, Percent, CheckCircle2, Coins } from "lucide-react";
+import { motion } from "motion/react";
+
+interface PurchaseOrderManagerProps {
+  projects: Project[];
+  setProjects: React.Dispatch<React.SetStateAction<Project[]>>;
+  transactions: Transaction[];
+  setTransactions: React.Dispatch<React.SetStateAction<Transaction[]>>;
+  selectedProjectId: string;
+  isReadOnly?: boolean;
+  onAddActivity?: (
+    type: "project" | "po" | "petycash_request" | "petycash_expense" | "invoice",
+    action: string,
+    description: string,
+    pic: string,
+    projectId?: string
+  ) => void;
+}
+
+export default function PurchaseOrderManager({
+  projects,
+  setProjects,
+  transactions,
+  setTransactions,
+  selectedProjectId,
+  onAddActivity,
+  isReadOnly = false,
+}: PurchaseOrderManagerProps) {
+  const [showAddForm, setShowAddForm] = React.useState(false);
+
+  // Link to existing project state
+  const [linkProjectId, setLinkProjectId] = React.useState<string>("new");
+
+  // Form Fields
+  const [poNo, setPoNo] = React.useState("");
+  const [projectName, setProjectName] = React.useState("");
+  const [projectCode, setProjectCode] = React.useState("");
+  const [supplier, setSupplier] = React.useState(""); // Owner / Client
+  const [pic, setPic] = React.useState("");
+  const [date, setDate] = React.useState(new Date().toISOString().split("T")[0]);
+
+  // Sync with selected existing project
+  React.useEffect(() => {
+    if (linkProjectId && linkProjectId !== "new") {
+      const foundProj = projects.find((p) => p.id === linkProjectId);
+      if (foundProj) {
+        setProjectName(foundProj.name);
+        setProjectCode(foundProj.code);
+        setPic(foundProj.pic || foundProj.manager || "");
+        setCompany(foundProj.company || "CV. Mandiri Cipta Jaya");
+        setPphPercentInput(foundProj.pphPercent ?? 4);
+        
+        // Populate contract items for the NEW PO - starting at 0 so they can enter the new PO's nominal values
+        let items = [];
+        if (foundProj.customContractItems && foundProj.customContractItems.length > 0) {
+          items = foundProj.customContractItems.map((item) => ({
+            id: item.id,
+            name: item.name,
+            value: 0,
+          }));
+        } else {
+          items = [
+            { id: "piping", name: foundProj.contractNames?.piping || "Piping", value: 0 },
+            { id: "electrical", name: foundProj.contractNames?.electrical || "Electrical", value: 0 },
+            { id: "mechanical", name: foundProj.contractNames?.mechanical || "Mechanical", value: 0 },
+            { id: "scafolder", name: foundProj.contractNames?.scafolder || "Scafolder", value: 0 },
+            { id: "welder", name: foundProj.contractNames?.welder || "Welder", value: 0 },
+          ];
+        }
+        setContractItems(items);
+      }
+    } else if (linkProjectId === "new") {
+      setProjectName("");
+      setProjectCode("");
+      setPic("");
+      setContractItems([
+        { id: "piping", name: "Piping", value: 0 },
+        { id: "electrical", name: "Electrical", value: 0 },
+        { id: "mechanical", name: "Mechanical", value: 0 },
+        { id: "scafolder", name: "Scafolder", value: 0 },
+        { id: "welder", name: "Welder", value: 0 },
+      ]);
+    }
+  }, [linkProjectId, projects]);
+
+  // Dynamic Contract Breakdown Items
+  const [contractItems, setContractItems] = React.useState<Array<{ id: string; name: string; value: number }>>([
+    { id: "piping", name: "Piping", value: 0 },
+    { id: "electrical", name: "Electrical", value: 0 },
+    { id: "mechanical", name: "Mechanical", value: 0 },
+    { id: "scafolder", name: "Scafolder", value: 0 },
+    { id: "welder", name: "Welder", value: 0 },
+  ]);
+
+  const [description, setDescription] = React.useState("");
+  const [status, setStatus] = React.useState("Waiting PO");
+
+  const [company, setCompany] = React.useState("CV. Mandiri Cipta Jaya");
+  const [customCompany, setCustomCompany] = React.useState("");
+  const [pphPercentInput, setPphPercentInput] = React.useState<number>(4);
+
+  // Filter States
+  const [filterProject, setFilterProject] = React.useState<string>("all");
+  const [searchQuery, setSearchQuery] = React.useState<string>("");
+
+  // Custom Modal Confirmation for Delete & Alert States
+  const [validationError, setValidationError] = React.useState<string | null>(null);
+  const [poToDelete, setPoToDelete] = React.useState<string | null>(null);
+  const [alertMessage, setAlertMessage] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (alertMessage) {
+      const timer = setTimeout(() => {
+        setAlertMessage(null);
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [alertMessage]);
+
+  const formatIDR = (val: number) => {
+    return new Intl.NumberFormat("id-ID", {
+      style: "currency",
+      currency: "IDR",
+      maximumFractionDigits: 0,
+    }).format(val);
+  };
+
+  const handleAddContractItem = () => {
+    setContractItems((prev) => [
+      ...prev,
+      { id: `item-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`, name: "", value: 0 },
+    ]);
+  };
+
+  const handleUpdateContractItemName = (id: string, name: string) => {
+    setContractItems((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, name } : item))
+    );
+  };
+
+  const handleUpdateContractItemValue = (id: string, value: number) => {
+    setContractItems((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, value } : item))
+    );
+  };
+
+  const handleRemoveContractItem = (id: string) => {
+    setContractItems((prev) => prev.filter((item) => item.id !== id));
+  };
+
+  // Generate automatic PO Number placeholder
+  React.useEffect(() => {
+    if (showAddForm && !poNo) {
+      const existingPOs = transactions.filter((t) => t.type === "PO");
+      const nextNum = existingPOs.length + 1;
+      setPoNo(`PO-OWNER-${String(nextNum).padStart(3, "0")}-2026`);
+    }
+  }, [showAddForm, transactions]);
+
+  const handleCreatePO = (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!poNo || !projectName || !projectCode || !supplier || !pic || !description) {
+      setValidationError("Harap lengkapi semua isian wajib (Nomor PO, Nama Proyek, Kode Proyek, Owner / Client, PIC, Deskripsi)!");
+      return;
+    }
+
+    const totalContractValue = contractItems.reduce((sum, item) => sum + Number(item.value || 0), 0);
+    if (totalContractValue <= 0) {
+      setValidationError("Total Nilai Rincian Kontrak harus lebih dari Rp 0!");
+      return;
+    }
+
+    setValidationError(null);
+
+    const targetProjectId = linkProjectId === "new" ? `proj-${Date.now()}` : linkProjectId;
+    const updatedCompany = company === "Lainnya" ? customCompany : company;
+
+    // 1. Create or Update the project
+    if (linkProjectId === "new") {
+      const pipingItem = contractItems.find(i => i.name.toLowerCase().includes("piping") || i.id === "piping" || i.id === "1");
+      const electricalItem = contractItems.find(i => i.name.toLowerCase().includes("elect") || i.id === "electrical" || i.id === "2");
+      const mechanicalItem = contractItems.find(i => i.name.toLowerCase().includes("mech") || i.id === "mechanical" || i.id === "3");
+      const scafolderItem = contractItems.find(i => i.name.toLowerCase().includes("scaf") || i.id === "scafolder" || i.id === "4");
+      const welderItem = contractItems.find(i => i.name.toLowerCase().includes("weld") || i.id === "welder" || i.id === "5");
+
+      const newProject: Project = {
+        id: targetProjectId,
+        name: projectName,
+        code: projectCode,
+        manager: pic, // PIC as Project Manager
+        pic: pic,
+        status: ProjectStatus.PROGRES,
+        startDate: date,
+        expectedProfitPercent: 35, // default
+        contractValue: {
+          piping: Number(pipingItem?.value || 0),
+          electrical: Number(electricalItem?.value || 0),
+          mechanical: Number(mechanicalItem?.value || 0),
+          scafolder: Number(scafolderItem?.value || 0),
+          welder: Number(welderItem?.value || 0),
+        },
+        contractNames: {
+          piping: pipingItem?.name || "Piping",
+          electrical: electricalItem?.name || "Electrical",
+          mechanical: mechanicalItem?.name || "Mechanical",
+          scafolder: scafolderItem?.name || "Scafolder",
+          welder: welderItem?.name || "Welder",
+        },
+        ppnPercent: 11,
+        pphPercent: pphPercentInput,
+        budgetThresholdPercent: 85,
+        notes: description,
+        company: updatedCompany,
+        poNo: poNo,
+        customContractItems: contractItems,
+      };
+      setProjects((prev) => [newProject, ...prev]);
+    } else {
+      // Update existing project in Project Management (Accumulate PO value)
+      setProjects((prev) =>
+        prev.map((proj) => {
+          if (proj.id === linkProjectId) {
+            // Retrieve existing custom contract items or build from contractValue
+            let existingItems = proj.customContractItems ? [...proj.customContractItems] : [];
+            if (existingItems.length === 0) {
+              existingItems = [
+                { id: "piping", name: proj.contractNames?.piping || "Piping", value: proj.contractValue?.piping || 0 },
+                { id: "electrical", name: proj.contractNames?.electrical || "Electrical", value: proj.contractValue?.electrical || 0 },
+                { id: "mechanical", name: proj.contractNames?.mechanical || "Mechanical", value: proj.contractValue?.mechanical || 0 },
+                { id: "scafolder", name: proj.contractNames?.scafolder || "Scafolder", value: proj.contractValue?.scafolder || 0 },
+                { id: "welder", name: proj.contractNames?.welder || "Welder", value: proj.contractValue?.welder || 0 },
+              ];
+            }
+
+            const mergedItems = existingItems.map((item) => ({ ...item }));
+
+            contractItems.forEach((newItem) => {
+              const match = mergedItems.find(
+                (item) => item.name.toLowerCase().trim() === newItem.name.toLowerCase().trim()
+              );
+              if (match) {
+                match.value = Number(match.value || 0) + Number(newItem.value || 0);
+              } else {
+                const isIdTaken = mergedItems.some((item) => item.id === newItem.id);
+                const uniqueId = (isIdTaken || !newItem.id)
+                  ? `item-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`
+                  : newItem.id;
+                mergedItems.push({
+                  id: uniqueId,
+                  name: newItem.name,
+                  value: Number(newItem.value || 0),
+                });
+              }
+            });
+
+            // Sum up standard categories for the contractValue field
+            const poPiping = Number(contractItems.find(i => i.name.toLowerCase().includes("piping") || i.id === "piping" || i.id === "1")?.value || 0);
+            const poElectrical = Number(contractItems.find(i => i.name.toLowerCase().includes("elect") || i.id === "electrical" || i.id === "2")?.value || 0);
+            const poMechanical = Number(contractItems.find(i => i.name.toLowerCase().includes("mech") || i.id === "mechanical" || i.id === "3")?.value || 0);
+            const poScafolder = Number(contractItems.find(i => i.name.toLowerCase().includes("scaf") || i.id === "scafolder" || i.id === "4")?.value || 0);
+            const poWelder = Number(contractItems.find(i => i.name.toLowerCase().includes("weld") || i.id === "welder" || i.id === "5")?.value || 0);
+
+            const pipingVal = (proj.contractValue?.piping || 0) + poPiping;
+            const electricalVal = (proj.contractValue?.electrical || 0) + poElectrical;
+            const mechanicalVal = (proj.contractValue?.mechanical || 0) + poMechanical;
+            const scafolderVal = (proj.contractValue?.scafolder || 0) + poScafolder;
+            const welderVal = (proj.contractValue?.welder || 0) + poWelder;
+
+            // Merge PO Numbers
+            const existingPoList = proj.poNo ? proj.poNo.split(", ").map(p => p.trim()) : [];
+            if (poNo && !existingPoList.includes(poNo.trim())) {
+              existingPoList.push(poNo.trim());
+            }
+            const updatedPoNo = existingPoList.join(", ");
+
+            return {
+              ...proj,
+              name: projectName,
+              code: projectCode,
+              pic: pic || proj.pic || proj.manager,
+              company: updatedCompany,
+              poNo: updatedPoNo,
+              customContractItems: mergedItems,
+              contractValue: {
+                piping: pipingVal,
+                electrical: electricalVal,
+                mechanical: mechanicalVal,
+                scafolder: scafolderVal,
+                welder: welderVal,
+              },
+            };
+          }
+          return proj;
+        })
+      );
+    }
+
+    // 2. Create the PO transaction (Owner PO) with detailed items
+    const newPO: Transaction = {
+      id: `po-${Date.now()}`,
+      projectId: targetProjectId,
+      type: "PO",
+      pic: pic,
+      date: date,
+      poNo: poNo,
+      supplier: supplier, // Owner / Client
+      status: status, // e.g. "Waiting PO", "Sudah Proses"
+      description: `Owner PO - ${description}`,
+      category: "Material", // Default category required by Category type
+      amount: totalContractValue,
+      contractItems: contractItems, // Save the items here
+      company: updatedCompany,
+    };
+
+    setTransactions((prev) => [newPO, ...prev]);
+
+    if (onAddActivity) {
+      const displayAmt = new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(totalContractValue);
+      const proj = projects.find((p) => p.id === targetProjectId);
+      onAddActivity(
+        "po",
+        "Material PO Tersimpan",
+        `Menginput Purchase Order baru [${poNo}] senilai ${displayAmt} untuk proyek "${proj ? proj.name : (projectName || "Proyek Baru")}"`,
+        pic || "Administrator",
+        targetProjectId
+      );
+    }
+
+    // Reset Form fields
+    setLinkProjectId("new");
+    setProjectName("");
+    setProjectCode("");
+    setPoNo("");
+    setSupplier("");
+    setPic("");
+    setContractItems([
+      { id: "piping", name: "Piping", value: 0 },
+      { id: "electrical", name: "Electrical", value: 0 },
+      { id: "mechanical", name: "Mechanical", value: 0 },
+      { id: "scafolder", name: "Scafolder", value: 0 },
+      { id: "welder", name: "Welder", value: 0 },
+    ]);
+    setDescription("");
+    setStatus("Waiting PO");
+    setCompany("CV. Mandiri Cipta Jaya");
+    setCustomCompany("");
+    setPphPercentInput(4);
+    setShowAddForm(false);
+    setAlertMessage(`Purchase Order (PO) "${poNo}" berhasil dicatat.`);
+  };
+
+  const triggerDeletePO = (id: string) => {
+    setPoToDelete(id);
+  };
+
+  const confirmDeletePO = () => {
+    if (!poToDelete) return;
+    const id = poToDelete;
+    const poToDel = transactions.find((t) => t.id === id);
+    if (poToDel && poToDel.projectId) {
+      const projId = poToDel.projectId;
+      const itemsToSubtract = poToDel.contractItems || [];
+
+      setProjects((prevProjects) =>
+        prevProjects.map((proj) => {
+          if (proj.id === projId) {
+            // Subtract customContractItems
+            let updatedCustomItems = proj.customContractItems
+              ? proj.customContractItems.map((item) => ({ ...item }))
+              : [];
+            itemsToSubtract.forEach((subItem) => {
+              const match = updatedCustomItems.find(
+                (item) => item.name.toLowerCase().trim() === subItem.name.toLowerCase().trim()
+              );
+              if (match) {
+                match.value = Math.max(0, Number(match.value || 0) - Number(subItem.value || 0));
+              }
+            });
+
+            // Subtract contractValue categories
+            const subPiping = Number(
+              itemsToSubtract.find((i) => i.name.toLowerCase().includes("piping") || i.id === "1")?.value || 0
+            );
+            const subElectrical = Number(
+              itemsToSubtract.find((i) => i.name.toLowerCase().includes("elect") || i.id === "2")?.value || 0
+            );
+            const subMechanical = Number(
+              itemsToSubtract.find((i) => i.name.toLowerCase().includes("mech") || i.id === "3")?.value || 0
+            );
+            const subScafolder = Number(
+              itemsToSubtract.find((i) => i.name.toLowerCase().includes("scaf") || i.id === "4")?.value || 0
+            );
+            const subWelder = Number(
+              itemsToSubtract.find((i) => i.name.toLowerCase().includes("weld") || i.id === "5")?.value || 0
+            );
+
+            const pipingVal = Math.max(0, (proj.contractValue?.piping || 0) - subPiping);
+            const electricalVal = Math.max(0, (proj.contractValue?.electrical || 0) - subElectrical);
+            const mechanicalVal = Math.max(0, (proj.contractValue?.mechanical || 0) - subMechanical);
+            const scafolderVal = Math.max(0, (proj.contractValue?.scafolder || 0) - subScafolder);
+            const welderVal = Math.max(0, (proj.contractValue?.welder || 0) - subWelder);
+
+            // Remove PO Number from project's poNo list
+            let updatedPoNo = proj.poNo || "";
+            if (poToDel.poNo) {
+              const poList = proj.poNo ? proj.poNo.split(", ").map((p) => p.trim()) : [];
+              const filteredPoList = poList.filter((p) => p !== poToDel.poNo?.trim());
+              updatedPoNo = filteredPoList.join(", ");
+            }
+
+            return {
+              ...proj,
+              poNo: updatedPoNo,
+              customContractItems: updatedCustomItems,
+              contractValue: {
+                piping: pipingVal,
+                electrical: electricalVal,
+                mechanical: mechanicalVal,
+                scafolder: scafolderVal,
+                welder: welderVal,
+              },
+            };
+          }
+          return proj;
+        })
+      );
+    }
+
+    setTransactions((prev) => prev.filter((t) => t.id !== id));
+    setPoToDelete(null);
+    setAlertMessage("Purchase Order (PO) berhasil dihapus.");
+  };
+
+  // Filter list of POs
+  const poList = transactions.filter((t) => t.type === "PO");
+
+  const filteredPOs = poList.filter((po) => {
+    if (filterProject !== "all" && po.projectId !== filterProject) return false;
+
+    if (searchQuery.trim() !== "") {
+      const q = searchQuery.toLowerCase();
+      const picMatch = po.pic?.toLowerCase().includes(q);
+      const supplierMatch = po.supplier?.toLowerCase().includes(q);
+      const poNoMatch = po.poNo?.toLowerCase().includes(q);
+      const descMatch = po.description?.toLowerCase().includes(q);
+      return picMatch || supplierMatch || poNoMatch || descMatch;
+    }
+
+    return true;
+  });
+
+  const totalPOSum = filteredPOs.reduce((sum, po) => sum + po.amount, 0);
+
+  return (
+    <div className="space-y-6 font-sans pb-12" id="purchase-order-section">
+      {/* HEADER */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h2 className="text-xl font-bold text-gray-900 tracking-tight flex items-center gap-2">
+            <ShoppingBag className="w-5.5 h-5.5 text-blue-600" />
+            Manajemen Purchase Order (PO) Material &amp; Jasa {isReadOnly && <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full font-bold">ReadOnly</span>}
+          </h2>
+          <p className="text-xs text-gray-500 mt-1">
+            Registrasi dan pelacakan PO Material atau Jasa yang dibebankan langsung ke anggaran masing-masing proyek.
+          </p>
+        </div>
+
+        {!isReadOnly && (
+          <button
+            onClick={() => {
+              if (showAddForm) {
+                setShowAddForm(false);
+              } else {
+                setLinkProjectId("new");
+                setProjectName("");
+                setProjectCode("");
+                setPoNo("");
+                setSupplier("");
+                setPic("");
+                setContractItems([
+                  { id: "piping", name: "Piping", value: 0 },
+                  { id: "electrical", name: "Electrical", value: 0 },
+                  { id: "mechanical", name: "Mechanical", value: 0 },
+                  { id: "scafolder", name: "Scafolder", value: 0 },
+                  { id: "welder", name: "Welder", value: 0 },
+                ]);
+                setDescription("");
+                setStatus("Waiting PO");
+                setPphPercentInput(4);
+                setShowAddForm(true);
+              }
+            }}
+            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl flex items-center justify-center gap-2 text-xs font-semibold shadow-md transition-all cursor-pointer"
+          >
+            {showAddForm ? "Tutup Form" : <><Plus className="w-4 h-4" /> Registrasi PO Baru</>}
+          </button>
+        )}
+      </div>
+
+      {/* PO FORM CONTAINER */}
+      {showAddForm && (
+        <motion.div
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-white border-2 border-blue-500/20 rounded-2xl shadow-lg overflow-hidden"
+        >
+          <div className="bg-blue-50/50 p-4 border-b border-blue-500/10 flex items-center gap-2">
+            <ShoppingBag className="w-5 h-5 text-blue-600" />
+            <h3 className="font-bold text-sm text-gray-900 font-sans">Form Registrasi Purchase Order (PO)</h3>
+          </div>
+
+          <form onSubmit={handleCreatePO} className="p-6 space-y-6">
+            {validationError && (
+              <div className="bg-red-50 border border-red-200 text-red-700 text-xs px-4 py-3 rounded-xl flex items-center justify-between">
+                <span>{validationError}</span>
+                <button type="button" onClick={() => setValidationError(null)} className="text-red-500 hover:text-red-700 font-bold px-1">&times;</button>
+              </div>
+            )}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+              {/* Hubungkan dengan Proyek */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-gray-700 flex items-center gap-1">
+                  Hubungkan dengan Proyek <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={linkProjectId}
+                  onChange={(e) => setLinkProjectId(e.target.value)}
+                  className="w-full bg-blue-50/50 border border-blue-200 rounded-xl px-3 py-2 text-xs focus:ring-1 focus:ring-blue-600 focus:bg-white text-gray-800 font-bold"
+                >
+                  <option value="new">+ Buat Registrasi Proyek Baru +</option>
+                  {projects.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      [{p.code}] {p.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* PO Number */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-gray-700">Nomor Purchase Order (PO) <span className="text-red-500">*</span></label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Contoh: PO-MCJ-EJT-001/IV/2026"
+                  value={poNo}
+                  onChange={(e) => setPoNo(e.target.value)}
+                  className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs focus:ring-1 focus:ring-blue-600 focus:bg-white font-mono font-bold"
+                />
+              </div>
+
+              {/* Nama Proyek */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-gray-700 flex items-center gap-1">
+                  Nama Proyek {linkProjectId === "new" ? "Baru" : ""} <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  disabled={linkProjectId !== "new"}
+                  placeholder="Contoh: PT SMART MARUNDA"
+                  value={projectName}
+                  onChange={(e) => setProjectName(e.target.value)}
+                  className="w-full bg-gray-50 disabled:opacity-75 disabled:bg-gray-100 border border-gray-200 rounded-xl px-3 py-2 text-xs focus:ring-1 focus:ring-blue-600 focus:bg-white"
+                />
+              </div>
+
+              {/* Kode Registrasi Proyek */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-gray-700">Kode Registrasi Proyek <span className="text-red-500">*</span></label>
+                <input
+                  type="text"
+                  required
+                  disabled={linkProjectId !== "new"}
+                  placeholder="Contoh: TSRT.SMART.001.2026"
+                  value={projectCode}
+                  onChange={(e) => setProjectCode(e.target.value)}
+                  className="w-full bg-gray-50 disabled:opacity-75 disabled:bg-gray-100 border border-gray-200 rounded-xl px-3 py-2 text-xs focus:ring-1 focus:ring-blue-600 focus:bg-white font-mono"
+                />
+              </div>
+
+              {/* Perusahaan */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-gray-700">Perusahaan Pelaksana <span className="text-red-500">*</span></label>
+                <select
+                  value={company}
+                  disabled={linkProjectId !== "new"}
+                  onChange={(e) => setCompany(e.target.value)}
+                  className="w-full bg-gray-50 disabled:opacity-75 disabled:bg-gray-100 border border-gray-200 rounded-xl px-3 py-2 text-xs focus:ring-1 focus:ring-blue-600 focus:bg-white text-gray-800 font-semibold"
+                >
+                  <option value="CV. Mandiri Cipta Jaya">CV. Mandiri Cipta Jaya</option>
+                  <option value="PT. Elqia Jaya Teknik">PT. Elqia Jaya Teknik</option>
+                  <option value="Lainnya">Lainnya (Ketik Manual)</option>
+                </select>
+                {company === "Lainnya" && (
+                  <input
+                    type="text"
+                    required
+                    disabled={linkProjectId !== "new"}
+                    placeholder="Nama Perusahaan..."
+                    value={customCompany}
+                    onChange={(e) => setCustomCompany(e.target.value)}
+                    className="w-full bg-gray-50 disabled:opacity-75 disabled:bg-gray-100 border border-gray-200 rounded-xl px-3 py-1.5 text-xs focus:ring-1 focus:ring-blue-600 focus:bg-white mt-1.5"
+                  />
+                )}
+              </div>
+
+              {/* Owner / Client */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-gray-700">
+                  Owner / Client (Pemberi Kerja) <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Contoh: PT Sinar Mas, Pertamina"
+                  value={supplier}
+                  onChange={(e) => setSupplier(e.target.value)}
+                  className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs focus:ring-1 focus:ring-blue-600 focus:bg-white"
+                />
+              </div>
+
+              {/* PIC Pembuat PO / PM */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-gray-700">
+                  PIC / Project Manager <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  disabled={linkProjectId !== "new"}
+                  placeholder="Contoh: Bpk Lily, Rifky, Ujang"
+                  value={pic}
+                  onChange={(e) => setPic(e.target.value)}
+                  className="w-full bg-gray-50 disabled:opacity-75 disabled:bg-gray-100 border border-gray-200 rounded-xl px-3 py-2 text-xs focus:ring-1 focus:ring-blue-600 focus:bg-white"
+                />
+              </div>
+
+              {/* Date */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-gray-700">Tanggal PO</label>
+                <input
+                  type="date"
+                  required
+                  value={date}
+                  onChange={(e) => setDate(e.target.value)}
+                  className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs focus:ring-1 focus:ring-blue-600 focus:bg-white font-mono"
+                />
+              </div>
+
+              {/* Status PO */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-gray-700">Status PO saat ini</label>
+                <select
+                  value={status}
+                  onChange={(e) => setStatus(e.target.value)}
+                  className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs focus:ring-1 focus:ring-blue-600 focus:bg-white text-amber-700 font-bold"
+                >
+                  <option value="Waiting PO">Waiting PO</option>
+                  <option value="Sudah Proses">Sudah Proses (Aktif)</option>
+                  <option value="Belum Proses">Belum Proses (Draft)</option>
+                  <option value="Selesai">Selesai (Barang Diterima)</option>
+                </select>
+              </div>
+
+              {/* PPh Selector */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-gray-700">Tingkat PPh Proyek</label>
+                <select
+                  value={pphPercentInput}
+                  disabled={linkProjectId !== "new"}
+                  onChange={(e) => setPphPercentInput(Number(e.target.value))}
+                  className="w-full bg-gray-50 disabled:opacity-75 disabled:bg-gray-100 border border-gray-200 rounded-xl px-3 py-2 text-xs focus:ring-1 focus:ring-blue-600 focus:bg-white text-red-700 font-bold"
+                >
+                  <option value={2}>PPh 2% (Jasa Konstruksi)</option>
+                  <option value={4}>PPh 4% (Jasa Non-Konstruksi)</option>
+                  <option value={0}>Tanpa PPh (0%)</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Rincian Nilai Kontrak Dasar */}
+            <div className="space-y-3 pt-4 border-t border-gray-100">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-1">
+                <div>
+                  <h4 className="text-xs font-bold text-gray-900 uppercase tracking-wider flex items-center gap-1.5">
+                    <Briefcase className="w-4 h-4 text-blue-600" /> Rincian Nilai Kontrak Dasar (Rupiah)
+                  </h4>
+                  <p className="text-[11px] text-gray-500 mt-0.5">Rincian nilai pekerjaan yang akan dipindahkan ke Manajemen Proyek secara dinamis.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleAddContractItem}
+                  className="bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-150 px-3 py-1.5 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1 cursor-pointer transition-all self-start sm:self-auto shadow-sm"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Tambah Rincian Manual
+                </button>
+              </div>
+              
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {contractItems.map((item, index) => (
+                  <div key={`${item.id}-${index}`} className="bg-slate-50 p-3.5 rounded-xl border border-gray-200/80 space-y-2.5 relative group">
+                    {/* Delete button */}
+                    {contractItems.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveContractItem(item.id)}
+                        className="absolute top-2 right-2 text-gray-400 hover:text-red-500 p-1 rounded-md hover:bg-red-50 transition-all cursor-pointer"
+                        title="Hapus rincian ini"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                    
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider flex items-center gap-1">
+                        <Percent className="w-3.5 h-3.5 text-blue-500" /> Nama Rincian {index + 1}
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="Contoh: Piping"
+                        value={item.name}
+                        onChange={(e) => handleUpdateContractItemName(item.id, e.target.value)}
+                        className="w-full bg-white border border-gray-200 rounded-lg px-2.5 py-1 text-xs focus:ring-1 focus:ring-blue-600 focus:bg-white font-semibold text-gray-800 pr-6"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Nilai Kontrak (Rp)</label>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        placeholder="Contoh: 1.000.000"
+                        value={item.value ? new Intl.NumberFormat("id-ID").format(item.value) : ""}
+                        onChange={(e) => {
+                          const clean = e.target.value.replace(/\D/g, "");
+                          handleUpdateContractItemValue(item.id, clean ? Number(clean) : 0);
+                        }}
+                        className="w-full bg-white border border-gray-200 rounded-lg px-2.5 py-1 text-xs focus:ring-1 focus:ring-blue-600 focus:bg-white font-mono font-bold text-gray-800"
+                      />
+                      <span className="text-[10px] text-gray-500 font-mono block mt-1">{formatIDR(item.value)}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Total Display */}
+              {(() => {
+                const rawContractSum = contractItems.reduce((sum, item) => sum + Number(item.value || 0), 0);
+                const calculatedPpn = rawContractSum * 0.11;
+                const calculatedPph = rawContractSum * (pphPercentInput / 100);
+                const calculatedNetto = rawContractSum + calculatedPpn - calculatedPph;
+
+                return (
+                  <div className="bg-slate-50 p-4 rounded-xl border border-gray-200 mt-2 space-y-2 text-xs shadow-inner">
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold text-gray-600">Total Nilai Dasar Kontrak (Bruto):</span>
+                      <span className="font-mono font-bold text-gray-800">
+                        {formatIDR(rawContractSum)}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-slate-500 text-[11px] border-b border-dashed border-gray-200 pb-2">
+                      <span>PPN (11%):</span>
+                      <span className="font-mono text-emerald-600">+{formatIDR(calculatedPpn)}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-slate-500 text-[11px] border-b border-gray-200 pb-2">
+                      <span className="font-semibold text-red-700">
+                        Potongan PPh ({pphPercentInput}%):
+                      </span>
+                      <span className="font-mono font-bold text-red-600">
+                        -{formatIDR(calculatedPph)}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between pt-1">
+                      <span className="font-extrabold text-slate-700 text-[11px] sm:text-xs">Estimasi Nilai Netto Kontrak (Bruto + PPN - PPh):</span>
+                      <span className="font-mono font-black text-blue-700 text-sm">
+                        {formatIDR(calculatedNetto)}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Deskripsi */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-gray-700">
+                Deskripsi &amp; Catatan Proyek / PO Owner <span className="text-red-500">*</span>
+              </label>
+              <textarea
+                rows={3}
+                required
+                placeholder="Ketikan deskripsi lengkap proyek, ruang lingkup kerja, lokasi, atau rincian spesifikasi..."
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 text-xs focus:ring-1 focus:ring-blue-600 focus:bg-white"
+              />
+            </div>
+
+            {/* Form Actions */}
+            <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
+              <button
+                type="button"
+                onClick={() => setShowAddForm(false)}
+                className="border border-gray-200 text-gray-600 px-4 py-2 text-xs font-semibold rounded-xl hover:bg-gray-50 transition-all cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="submit"
+                className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 text-xs font-bold rounded-xl shadow-md transition-all cursor-pointer"
+              >
+                Simpan PO &amp; Daftarkan Proyek Otomatis
+              </button>
+            </div>
+          </form>
+        </motion.div>
+      )}
+
+      {/* FILTER PANEL */}
+      <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-5 space-y-4">
+        <div className="flex items-center gap-2 text-xs font-bold text-gray-500 uppercase tracking-wider">
+          <ListFilter className="w-4 h-4 text-blue-600" /> Filter Purchase Order (PO)
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {/* Project Filter */}
+          <div className="space-y-1">
+            <label className="text-[11px] font-semibold text-gray-500">Berdasarkan Proyek</label>
+            <select
+              value={filterProject}
+              onChange={(e) => setFilterProject(e.target.value)}
+              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-1.5 text-xs focus:ring-1 focus:ring-blue-600"
+            >
+              <option value="all">Semua Proyek</option>
+              {projects.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Search Bar */}
+          <div className="space-y-1">
+            <label className="text-[11px] font-semibold text-gray-500">Pencarian Owner / No PO / PIC / Rincian</label>
+            <div className="relative">
+              <Search className="absolute left-2.5 top-2 w-4 h-4 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Cari kata kunci..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full bg-gray-50 border border-gray-200 rounded-xl pl-9 pr-3 py-1.5 text-xs focus:ring-1 focus:ring-blue-600"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Filter Summary */}
+        <div className="flex justify-between items-center text-xs pt-3 border-t border-gray-100">
+          <span className="text-gray-500">
+            Ditemukan <strong className="text-gray-900">{filteredPOs.length}</strong> purchase order dari total{" "}
+            <strong>{poList.length}</strong>
+          </span>
+          <span className="text-slate-500 font-semibold">
+            Total Saringan PO: <strong className="text-red-600 font-mono text-sm">{formatIDR(totalPOSum)}</strong>
+          </span>
+        </div>
+      </div>
+
+      {/* TABLE */}
+      <div className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse text-xs">
+            <thead>
+              <tr className="bg-slate-900 text-white font-semibold">
+                <th className="p-3.5">Tanggal</th>
+                <th className="p-3.5">Nomor PO</th>
+                <th className="p-3.5">Owner / Client (Pemberi Kerja)</th>
+                <th className="p-3.5">Daftar Proyek / PIC</th>
+                <th className="p-3.5">Deskripsi Proyek</th>
+                <th className="p-3.5 text-right">Nilai Nominal Kontrak</th>
+                <th className="p-3.5 text-center">Status PO</th>
+                {!isReadOnly && <th className="p-3.5 text-right">Aksi</th>}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {filteredPOs.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="p-8 text-center text-gray-400">
+                    Tidak ditemukan data Purchase Order (PO) dari Owner.
+                  </td>
+                </tr>
+              ) : (
+                filteredPOs.map((po) => {
+                  const proj = projects.find((p) => p.id === po.projectId);
+
+                  return (
+                    <tr key={po.id} className="hover:bg-slate-50/50">
+                      {/* Date */}
+                      <td className="p-3.5 whitespace-nowrap text-gray-500 font-mono">
+                        {po.date}
+                      </td>
+
+                      {/* PO Number */}
+                      <td className="p-3.5 whitespace-nowrap font-mono space-y-1">
+                        <div className="font-bold text-slate-700">{po.poNo || "-"}</div>
+                        {po.company && (
+                          <div className="text-[10px] text-blue-700 font-bold uppercase tracking-wider font-sans">
+                            🏢 {po.company}
+                          </div>
+                        )}
+                      </td>
+
+                      {/* Supplier */}
+                      <td className="p-3.5 font-bold text-slate-800">
+                        {po.supplier || "-"}
+                      </td>
+
+                      {/* Project / PIC */}
+                      <td className="p-3.5 space-y-1">
+                        <p className="font-semibold text-slate-700 truncate max-w-[140px]" title={proj?.name}>
+                          {proj ? proj.name : "Proyek Dihapus"}
+                        </p>
+                        <p className="text-[9px] text-gray-400 font-mono">CODE: {proj?.code || "-"}</p>
+                        <p className="text-[9px] text-gray-400">PIC: {po.pic}</p>
+                      </td>
+
+                      {/* Description */}
+                      <td className="p-3.5 max-w-xs">
+                        <p className="text-slate-900 font-medium leading-relaxed" style={{ wordBreak: "break-word" }}>
+                          {po.description}
+                        </p>
+                      </td>
+
+                      {/* Amount */}
+                      <td className="p-3.5 text-right font-mono space-y-1">
+                        <div className="font-bold text-slate-900 text-sm">{formatIDR(po.amount)}</div>
+                        {proj && (
+                          <div className="text-[10px] text-gray-500 flex flex-col items-end gap-0.5">
+                            <span className="text-[9px] text-gray-400">PPN (11%): +{formatIDR(po.amount * 0.11)}</span>
+                            <span className="font-semibold text-red-600">
+                              PPh ({proj.pphPercent !== undefined ? proj.pphPercent : 4}%): -{formatIDR(po.amount * ((proj.pphPercent !== undefined ? proj.pphPercent : 4) / 100))}
+                            </span>
+                            <span className="font-bold text-blue-700 text-[10px] border-t border-gray-100 pt-0.5 mt-0.5">
+                              Netto: {formatIDR(po.amount + (po.amount * 0.11) - (po.amount * ((proj.pphPercent !== undefined ? proj.pphPercent : 4) / 100)))}
+                            </span>
+                          </div>
+                        )}
+                      </td>
+
+                      {/* Status */}
+                      <td className="p-3.5 text-center">
+                        <span
+                          className={`text-[9px] font-bold px-2 py-0.5 rounded uppercase tracking-wider border ${
+                            po.status === "Selesai"
+                              ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+                              : po.status === "Waiting PO"
+                              ? "bg-amber-50 text-amber-800 border-amber-200"
+                              : po.status === "Belum Proses"
+                              ? "bg-gray-50 text-gray-700 border-gray-200"
+                              : "bg-blue-50 text-blue-800 border-blue-200"
+                          }`}
+                        >
+                          {po.status}
+                        </span>
+                      </td>
+
+                      {/* Actions */}
+                      {!isReadOnly && (
+                        <td className="p-3.5 text-right">
+                          <button
+                            onClick={() => triggerDeletePO(po.id)}
+                            className="text-gray-400 hover:text-red-600 p-1.5 rounded hover:bg-red-50 transition-colors cursor-pointer"
+                            title="Hapus PO"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* CONFIRM DELETE MODAL */}
+      {poToDelete && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl overflow-hidden border border-gray-100 animate-in fade-in zoom-in-95 duration-200">
+            <div className="p-6 text-center space-y-4">
+              <div className="mx-auto w-12 h-12 bg-red-100 text-red-600 rounded-full flex items-center justify-center shadow-inner">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div className="space-y-1.5">
+                <h3 className="text-base font-bold text-gray-900">Hapus Purchase Order (PO)?</h3>
+                <p className="text-xs text-gray-500 leading-relaxed">
+                  Apakah Anda yakin ingin menghapus Purchase Order (PO) ini secara permanen dari sistem?
+                </p>
+              </div>
+            </div>
+            <div className="bg-gray-50 p-4 flex gap-3 justify-end border-t border-gray-100">
+              <button
+                type="button"
+                onClick={() => setPoToDelete(null)}
+                className="px-4 py-2.5 bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 font-semibold rounded-xl text-xs transition-all cursor-pointer shadow-sm"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={confirmDeletePO}
+                className="px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-xl text-xs transition-all cursor-pointer shadow-md flex items-center gap-1.5 hover:shadow-lg hover:shadow-red-500/15"
+              >
+                <Trash2 className="w-3.5 h-3.5" /> Ya, Hapus
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ALERT TOAST NOTIFICATION */}
+      {alertMessage && (
+        <div className="fixed bottom-5 right-5 bg-slate-900 text-white px-5 py-4 rounded-2xl shadow-2xl flex items-center justify-between gap-4 z-50 border border-slate-800 animate-in slide-in-from-bottom-5 duration-300 max-w-sm">
+          <div className="flex items-center gap-2.5">
+            <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+            <p className="text-[11px] font-medium leading-relaxed text-slate-200">{alertMessage}</p>
+          </div>
+          <button
+            onClick={() => setAlertMessage(null)}
+            className="text-slate-400 hover:text-white font-bold text-sm shrink-0 hover:bg-slate-800/50 w-5 h-5 rounded-full flex items-center justify-center transition-colors"
+          >
+            &times;
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}

@@ -31,6 +31,11 @@ import {
   Check,
   Eye,
   EyeOff,
+  Menu,
+  Sun,
+  Moon,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { Project, Transaction, BudgetAlert, ProjectStatus, ActivityLog } from "./types";
 import { INITIAL_PROJECTS, INITIAL_TRANSACTIONS, COMPANY_INFO, INITIAL_ACTIVITIES } from "./data";
@@ -165,6 +170,15 @@ export default function App() {
   const [alerts, setAlerts] = useState<BudgetAlert[]>([]);
   const [activeTab, setActiveTab] = useState<string>("dashboard");
   const [selectedProjectId, setSelectedProjectId] = useState<string>("all");
+  
+  // Theme and Sidebar States
+  const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
+    return localStorage.getItem("mcj_theme") === "dark";
+  });
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
+    return localStorage.getItem("mcj_sidebar_collapsed") === "true";
+  });
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState<boolean>(false);
 
   // Custom modal and toast states
   const [showResetModal, setShowResetModal] = useState(false);
@@ -190,6 +204,17 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem("mcj_categories", JSON.stringify(categories));
   }, [categories]);
+
+  // Sync dark mode class
+  useEffect(() => {
+    if (isDarkMode) {
+      document.documentElement.classList.add("dark");
+      localStorage.setItem("mcj_theme", "dark");
+    } else {
+      document.documentElement.classList.remove("dark");
+      localStorage.setItem("mcj_theme", "light");
+    }
+  }, [isDarkMode]);
 
   // REAL-TIME SERVER SYNC LOGIC
   const [serverLastUpdated, setServerLastUpdated] = useState<number>(0);
@@ -631,214 +656,306 @@ export default function App() {
 
   if (!userRole) {
     return (
-      <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4 relative overflow-hidden font-sans">
-        {/* Background blobs for depth */}
-        <div className="absolute top-1/4 left-1/4 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-blue-600/10 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute bottom-1/4 right-1/4 translate-x-1/2 translate-y-1/2 w-96 h-96 bg-indigo-600/10 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute top-10 right-10 flex flex-col items-end gap-1 pointer-events-none select-none opacity-20">
-          <span className="text-xs font-mono">STATUS: LIVE SERVER</span>
-          <span className="text-[10px] font-mono">DB: data-db.json</span>
-        </div>
-
-        <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl relative z-10">
+      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex items-center justify-center p-4 relative overflow-hidden font-sans">
+        {/* Background glow effects */}
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-gradient-to-b from-blue-500/10 to-indigo-500/0 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute -bottom-40 -left-40 w-96 h-96 bg-blue-500/5 rounded-full blur-3xl pointer-events-none" />
+        
+        <div className="w-full max-w-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-8 shadow-xl dark:shadow-2xl relative z-10 transition-all">
           
           {/* Logo & Header */}
           <div className="text-center mb-8">
-            <div className="mx-auto w-16 h-16 bg-gradient-to-tr from-blue-600 to-indigo-500 rounded-2xl flex items-center justify-center text-white text-xl font-extrabold shadow-xl shadow-blue-500/20 border border-blue-400 mb-4 animate-bounce duration-1000">
-              MCJ
+            <div className="mx-auto inline-flex px-4 h-12 bg-blue-600 dark:bg-blue-500 rounded-xl items-center justify-center text-white text-base font-black shadow-md shadow-blue-500/20 mb-4 select-none">
+              MCJxEJT
             </div>
-            <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight">Portal Keuangan Proyek</h1>
-            <p className="text-xs text-slate-400 mt-1 uppercase tracking-wider font-bold">
-              CV. Mandiri Cipta Jaya <span className="text-amber-500">&times;</span> PT. Elqia Jaya Teknik
+            <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight text-slate-950 dark:text-white">Portal Keuangan Proyek</h1>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5 uppercase tracking-wider font-bold">
+              CV. Mandiri Cipta Jaya <span className="text-blue-500 font-extrabold">&times;</span> PT. Elqia Jaya Teknik
             </p>
           </div>
-
+ 
           {/* Form */}
           <form
             onSubmit={handleLoginSubmit}
-            className="space-y-4"
+            className="space-y-5"
           >
             {loginError && (
-              <div className="p-3 bg-red-950/40 border border-red-500/30 rounded-xl text-xs text-red-400 flex items-center gap-2">
+              <div className="p-3.5 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-500/20 rounded-xl text-xs text-red-600 dark:text-red-400 flex items-center gap-2.5 animate-pulse">
                 <AlertTriangle className="w-4 h-4 shrink-0" />
-                <span>{loginError}</span>
+                <span className="font-medium">{loginError}</span>
               </div>
             )}
-
-            <div>
-              <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">Username</label>
+ 
+            <div className="space-y-1.5">
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">Username</label>
               <input
                 type="text"
                 placeholder="Masukkan username"
                 value={usernameInput}
                 onChange={(e) => setUsernameInput(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 transition-colors"
+                className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-3 text-sm text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all font-sans"
                 required
               />
             </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">Password</label>
+ 
+            <div className="space-y-1.5">
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">Password</label>
               <div className="relative">
                 <input
                   type={showPassword ? "text" : "password"}
                   placeholder="Masukkan password"
                   value={passwordInput}
                   onChange={(e) => setPasswordInput(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-4 pr-12 py-3 text-sm focus:outline-none focus:border-blue-500 transition-colors font-mono"
+                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl pl-4 pr-12 py-3 text-sm text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all font-mono"
                   required
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 cursor-pointer"
+                  className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer p-1"
                 >
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
             </div>
-
+ 
             {/* Remember Me and Forgot Password */}
-            <div className="flex items-center justify-between text-[11px] pt-1">
-              <label className="flex items-center gap-2 text-slate-300 cursor-pointer select-none">
+            <div className="flex items-center justify-between text-xs pt-1">
+              <label className="flex items-center gap-2 text-slate-600 dark:text-slate-300 cursor-pointer select-none">
                 <input
                   type="checkbox"
                   checked={rememberMe}
                   onChange={(e) => setRememberMe(e.target.checked)}
-                  className="rounded border-slate-800 bg-slate-950 text-blue-600 focus:ring-0 cursor-pointer w-3.5 h-3.5"
+                  className="rounded border-slate-300 dark:border-slate-800 bg-slate-100 dark:bg-slate-950 text-blue-600 focus:ring-0 cursor-pointer w-4 h-4"
                 />
-                <span>Ingat Saya</span>
+                <span className="font-medium">Ingat Saya</span>
               </label>
               <button
                 type="button"
                 onClick={() => setShowForgotPassword(true)}
-                className="text-blue-400 hover:text-blue-300 font-semibold cursor-pointer"
+                className="text-blue-600 dark:text-blue-400 hover:text-blue-500 dark:hover:text-blue-300 font-semibold cursor-pointer"
               >
                 Lupa Password?
               </button>
             </div>
-
+ 
             <button
               type="submit"
               disabled={loginLoading}
-              className="w-full bg-blue-600 hover:bg-blue-500 disabled:bg-blue-800 disabled:text-slate-400 text-white font-bold py-3 px-4 rounded-xl text-sm transition-all shadow-lg shadow-blue-500/20 active:scale-[0.98] cursor-pointer flex items-center justify-center gap-2"
+              className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800 disabled:text-slate-400 text-white font-bold py-3 px-4 rounded-xl text-sm transition-all shadow-md shadow-blue-500/10 active:scale-[0.98] cursor-pointer flex items-center justify-center gap-2"
             >
               {loginLoading ? (
                 <>
                   <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  Memproses...
+                  <span>Memproses...</span>
                 </>
               ) : (
-                "Masuk Sistem"
+                <span>Masuk Sistem</span>
               )}
             </button>
           </form>
-
+ 
           {/* Forgot Password Modal Overlay */}
           {showForgotPassword && (
-            <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-              <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-sm w-full space-y-4">
-                <h3 className="text-sm font-bold text-slate-200 flex items-center gap-2">
-                  <Key className="w-4 h-4 text-blue-400" /> Pemulihan Kata Sandi
+            <div className="fixed inset-0 bg-black/50 dark:bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 max-w-sm w-full space-y-4 shadow-2xl">
+                <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                  <Key className="w-4 h-4 text-blue-600 dark:text-blue-400" /> Pemulihan Kata Sandi
                 </h3>
-                <p className="text-xs text-slate-400 leading-relaxed">
+                <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed font-medium">
                   Untuk menjaga integritas keuangan proyek, pemulihan kata sandi tidak dapat dilakukan secara mandiri.
-                  Silakan hubungi <strong>Direksi</strong> atau <strong>IT Administrator CV. Mandiri Cipta Jaya</strong> untuk menyetel ulang kata sandi Anda.
+                  Silakan hubungi <strong className="text-slate-800 dark:text-white">Direksi</strong> atau <strong className="text-slate-800 dark:text-white">IT Administrator</strong> untuk menyetel ulang kata sandi Anda.
                 </p>
                 <button
                   type="button"
                   onClick={() => setShowForgotPassword(false)}
-                  className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold rounded-xl text-xs transition-colors cursor-pointer"
+                  className="w-full py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-semibold rounded-xl text-xs transition-colors cursor-pointer"
                 >
                   Tutup
                 </button>
               </div>
             </div>
           )}
-
-
-          <div className="text-center mt-8 pt-6 border-t border-slate-800">
-            <p className="text-[10px] text-slate-500">
+ 
+          <div className="text-center mt-8 pt-6 border-t border-slate-150 dark:border-slate-800">
+            <p className="text-[10px] text-slate-400 dark:text-slate-500 font-semibold">
               Sistem Keuangan Mandiri Cipta Jaya &amp; Elqia Jaya Teknik &copy; 2026
             </p>
           </div>
-
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans flex flex-col selection:bg-blue-100 selection:text-blue-900">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 font-sans flex selection:bg-blue-100 dark:selection:bg-blue-900 selection:text-blue-900 dark:selection:text-blue-100 transition-colors">
       
-      {/* GLOBAL CORPORATE TOPBAR HEADER */}
-      <header className="bg-slate-900 text-white border-b border-slate-800 shadow-md sticky top-0 z-50 print:hidden font-sans">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          
-          {/* Logo & Corporate Identity */}
-          <div className="flex items-center gap-3">
-            <div className="px-3 h-10 bg-gradient-to-tr from-blue-700 to-indigo-500 text-white font-black text-xs sm:text-sm flex items-center justify-center rounded-xl shadow-lg border border-blue-500 select-none whitespace-nowrap">
-              MCJ x EJT
+      {/* MOBILE SIDEBAR DRAWER OVERLAY */}
+      {mobileSidebarOpen && (
+        <div 
+          className="fixed inset-0 bg-slate-950/40 backdrop-blur-sm z-40 lg:hidden"
+          onClick={() => setMobileSidebarOpen(false)}
+        />
+      )}
+
+      {/* COLLAPSIBLE SIDEBAR FOR DESKTOP & MOBILE DRAWER */}
+      <aside className={`fixed inset-y-0 left-0 z-50 lg:static flex flex-col bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 transition-all duration-300 print:hidden h-full shrink-0
+        ${mobileSidebarOpen ? "translate-x-0 w-64" : "-translate-x-full lg:translate-x-0"}
+        ${sidebarCollapsed ? "lg:w-[70px]" : "lg:w-64"}
+      `}>
+        {/* Brand Header */}
+        <div className="h-16 flex items-center justify-between px-4 border-b border-slate-200 dark:border-slate-800 shrink-0">
+          <div className="flex items-center gap-3 overflow-hidden">
+            <div className="px-2 h-9 bg-blue-600 dark:bg-blue-500 text-white font-black text-[10px] flex items-center justify-center rounded-xl shadow-md shrink-0 select-none">
+              MCJxEJT
             </div>
-            <div>
-              <h1 className="text-sm sm:text-base font-extrabold tracking-tight leading-tight flex items-center gap-2">
-                {COMPANY_INFO.name}
-              </h1>
-              <div className="flex items-center gap-2 mt-0.5">
-                <p className="text-[9px] text-blue-400 font-bold uppercase tracking-wider leading-none">
-                  SISTEM PELACAK BIAYA &amp; KONTRAK REAL-TIME
-                </p>
-                <span className="text-[8px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 rounded font-extrabold tracking-wider uppercase leading-none inline-flex items-center">
-                  Sistem Aktif
-                </span>
+            {!sidebarCollapsed && (
+              <div className="flex flex-col truncate">
+                <span className="text-xs font-black tracking-wider text-slate-900 dark:text-white leading-none uppercase">MCJ x EJT</span>
+                <span className="text-[9px] text-slate-400 dark:text-slate-500 font-bold tracking-widest uppercase mt-0.5">FINANCIALS</span>
               </div>
+            )}
+          </div>
+          {mobileSidebarOpen && (
+            <button 
+              onClick={() => setMobileSidebarOpen(false)}
+              className="lg:hidden p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+
+        {/* Navigation Sidebar List */}
+        <div className="flex-1 py-4 overflow-y-auto px-3 space-y-1.5 scrollbar-thin">
+          {[
+            { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+            { id: "projects", label: "Proyek", icon: Briefcase },
+            { id: "purchase_order", label: "Purchase Order", icon: ShoppingBag },
+            { 
+              id: "pety_cash_request", 
+              label: "Pengajuan Petty Cash", 
+              icon: Send,
+              badge: transactions.filter((t) => t.type === "PetyCashRequest" && t.status === "Belum Proses").length 
+            },
+            { id: "pety_cash_expense", label: "Pengeluaran", icon: Receipt },
+            { id: "salary", label: "Input Gaji", icon: Coins },
+            { id: "invoices", label: "Invoice", icon: Landmark },
+            { id: "reports", label: "Laporan", icon: FileText },
+            { 
+              id: "closed_recap", 
+              label: "Closing Proyek", 
+              icon: CheckSquare,
+              badge: projects.filter((p) => p.status === ProjectStatus.CLOSING).length 
+            },
+            { id: "backup", label: "Backup & Restore", icon: Database }
+          ].map((item) => {
+            const IconComponent = item.icon;
+            const isActive = activeTab === item.id;
+            return (
+              <button
+                key={item.id}
+                onClick={() => {
+                  setActiveTab(item.id);
+                  if (mobileSidebarOpen) setMobileSidebarOpen(false);
+                }}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold transition-all relative group cursor-pointer
+                  ${isActive 
+                    ? "bg-blue-600 dark:bg-blue-500 text-white shadow-md shadow-blue-500/10" 
+                    : "text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/60 hover:text-slate-900 dark:hover:text-slate-200"
+                  }
+                `}
+                title={sidebarCollapsed ? item.label : undefined}
+              >
+                <IconComponent className="w-4 h-4 shrink-0" />
+                {!sidebarCollapsed && <span className="truncate flex-1 text-left">{item.label}</span>}
+                {item.badge && item.badge > 0 ? (
+                  sidebarCollapsed ? (
+                    <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full ring-2 ring-white dark:ring-slate-900" />
+                  ) : (
+                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${isActive ? "bg-white text-blue-600" : "bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-400"}`}>
+                      {item.badge}
+                    </span>
+                  )
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Sidebar Footer / Collapse Trigger */}
+        <div className="p-3 border-t border-slate-200 dark:border-slate-800 shrink-0 hidden lg:block">
+          <button
+            onClick={() => {
+              setSidebarCollapsed(!sidebarCollapsed);
+              localStorage.setItem("mcj_sidebar_collapsed", String(!sidebarCollapsed));
+            }}
+            className="w-full flex items-center justify-center p-2 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-850 transition-colors cursor-pointer"
+            title={sidebarCollapsed ? "Perbesar Sidebar" : "Perkecil Sidebar"}
+          >
+            {sidebarCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
+          </button>
+        </div>
+      </aside>
+
+      {/* RIGHT WORKSPACE */}
+      <div className="flex-1 flex flex-col min-w-0 min-h-screen">
+        
+        {/* TOPBAR */}
+        <header className="h-16 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between px-4 sm:px-6 sticky top-0 z-35 print:hidden transition-all duration-300">
+          
+          {/* Topbar Left (Mobile trigger & active tab info) */}
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setMobileSidebarOpen(true)}
+              className="lg:hidden p-2 rounded-xl text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+              title="Menu"
+            >
+              <Menu className="w-5 h-5" />
+            </button>
+            <div>
+              <h2 className="text-xs font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-widest">Portal Keuangan</h2>
+              <h1 className="text-sm font-bold text-slate-800 dark:text-slate-200 capitalize tracking-tight leading-tight flex items-center gap-1.5 mt-0.5">
+                {activeTab.replace(/_/g, ' ')}
+              </h1>
             </div>
           </div>
 
-          {/* Action Tools (Notification Center & Reset Tool) */}
-          <div className="flex items-center gap-3">
-            {/* Quick stats indicator */}
-            <div className="hidden md:flex items-center gap-4 text-xs text-gray-300 mr-2 border-r border-slate-800 pr-5">
-              <div className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                <span>Pelacak Aktif</span>
-              </div>
-              <div>
-                <span>Total Kontrak: </span>
-                <strong className="text-blue-400">
-                  {projects.filter(p => p.status !== ProjectStatus.CANCEL).length} Proyek
-                </strong>
-              </div>
+          {/* Topbar Right (Actions & Profile) */}
+          <div className="flex items-center gap-2 sm:gap-3">
+            
+            {/* Dark Mode Toggle */}
+            <button
+              onClick={() => setIsDarkMode(!isDarkMode)}
+              className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-850 transition-colors cursor-pointer"
+              title={isDarkMode ? "Aktifkan Mode Terang" : "Aktifkan Mode Gelap"}
+            >
+              {isDarkMode ? <Sun className="w-4 h-4 text-amber-500" /> : <Moon className="w-4 h-4 text-blue-600" />}
+            </button>
+
+            {/* Quick Proyek stats (hidden on small screen) */}
+            <div className="hidden xl:flex flex-col text-right mr-1 border-r border-slate-200 dark:border-slate-800 pr-4">
+              <span className="text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Status Sistem</span>
+              <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5 mt-0.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                {projects.filter(p => p.status !== ProjectStatus.CANCEL).length} Proyek Aktif
+              </span>
             </div>
 
-            {/* Active User profile with role and name */}
-            {currentUser ? (
-              <div className="flex items-center gap-2 mr-1">
-                <div className="hidden sm:flex flex-col text-right">
-                  <span className="text-xs font-bold text-white leading-none tracking-wide">{currentUser.fullName}</span>
-                  <span className="text-[10px] text-slate-400 mt-0.5 font-semibold tracking-wider font-mono">{currentUser.username}</span>
+            {/* User Profile */}
+            {currentUser && (
+              <div className="hidden md:flex items-center gap-2 bg-slate-50 dark:bg-slate-850 border border-slate-100 dark:border-slate-800/80 px-3 py-1.5 rounded-2xl">
+                <div className="flex flex-col text-right">
+                  <span className="text-xs font-bold text-slate-800 dark:text-slate-200 leading-none">{currentUser.fullName}</span>
+                  <span className="text-[10px] text-slate-400 mt-0.5 font-bold font-mono tracking-wider">{currentUser.username}</span>
                 </div>
-                <div className={`px-2.5 py-1 text-[10px] sm:text-xs font-bold rounded-xl border flex items-center gap-1.5 whitespace-nowrap ${
-                  userRole === "direktur" || userRole === "user"
-                    ? "bg-indigo-950/40 text-indigo-400 border-indigo-500/30"
-                    : "bg-blue-950/40 text-blue-400 border-blue-500/30"
-                }`}>
-                  <span className={`w-1.5 h-1.5 rounded-full ${userRole === "direktur" || userRole === "user" ? "bg-indigo-400 animate-pulse" : "bg-blue-400 animate-pulse"}`} />
-                  <span>{getRoleLabel(userRole)}</span>
-                </div>
-              </div>
-            ) : (
-              <div className={`px-2.5 py-1 text-[10px] sm:text-xs font-bold rounded-xl border flex items-center gap-1.5 whitespace-nowrap ${
-                userRole === "direktur" || userRole === "user"
-                  ? "bg-indigo-950/40 text-indigo-400 border-indigo-500/30"
-                  : "bg-blue-950/40 text-blue-400 border-blue-500/30"
-              }`}>
-                <span className={`w-1.5 h-1.5 rounded-full ${userRole === "direktur" || userRole === "user" ? "bg-indigo-400 animate-pulse" : "bg-blue-400 animate-pulse"}`} />
-                <span>{getRoleLabel(userRole)}</span>
+                <span className="text-[10px] px-2 py-0.5 bg-blue-100 dark:bg-blue-950/50 text-blue-700 dark:text-blue-400 font-black rounded-lg border border-blue-200/30">
+                  {getRoleLabel(userRole)}
+                </span>
               </div>
             )}
 
-            {/* User Management Button (Admin/Karyawan only) */}
+            {/* Kelola Karyawan Button (Admin/Karyawan only) */}
             {(userRole === "admin" || userRole === "karyawan") && (
               <button
                 onClick={() => {
@@ -851,15 +968,15 @@ export default function App() {
                   setMgmtSuccess(null);
                   setShowUserMgmtModal(true);
                 }}
-                className="text-xs bg-slate-800 border border-slate-700 hover:border-blue-500 hover:text-blue-400 hover:bg-slate-850 text-gray-300 px-3 py-2 rounded-xl font-semibold tracking-wide transition-all cursor-pointer flex items-center gap-1.5"
+                className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-850 transition-colors cursor-pointer flex items-center gap-1.5"
                 title="Kelola Akun Pengguna Karyawan"
               >
-                <Users className="w-3.5 h-3.5 text-blue-400" />
-                <span className="hidden lg:inline">Kelola Karyawan</span>
+                <Users className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                <span className="text-xs font-semibold hidden md:inline">Karyawan</span>
               </button>
             )}
 
-            {/* Alert Notification Bell */}
+            {/* Notification Center */}
             <NotificationCenter
               projects={projects}
               transactions={transactions}
@@ -870,7 +987,8 @@ export default function App() {
             {/* Dev Reset Seed Tool */}
             <button
               onClick={handleResetData}
-              className="text-xs bg-slate-800 border border-slate-700 hover:border-red-500 hover:text-red-400 hover:bg-slate-800/80 text-gray-400 px-3.5 py-2.5 rounded-xl font-semibold tracking-wide transition-all cursor-pointer"
+              className="text-xs bg-slate-100 dark:bg-slate-800 hover:bg-red-50 dark:hover:bg-red-950/30 hover:text-red-600 border border-transparent hover:border-red-200 px-3.5 py-2.5 rounded-xl font-bold tracking-wide transition-all cursor-pointer text-slate-600 dark:text-slate-300"
+              title="Reset Data Keuangan"
             >
               Reset Data
             </button>
@@ -878,182 +996,16 @@ export default function App() {
             {/* Logout Button */}
             <button
               onClick={handleLogout}
-              className="text-xs bg-slate-800 border border-slate-700 hover:border-red-500 hover:text-red-400 hover:bg-slate-800/80 text-gray-400 p-2.5 rounded-xl font-semibold transition-all cursor-pointer flex items-center justify-center"
+              className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 transition-all cursor-pointer flex items-center justify-center shrink-0"
               title="Keluar"
             >
               <LogOut className="w-4 h-4" />
             </button>
           </div>
-        </div>
-      </header>
+        </header>
 
-      {/* CORPORATE HERO RAIL / NAVIGATION CARDS (print:hidden) */}
-      <nav className="bg-white border-b border-gray-200 py-3.5 shadow-sm print:hidden font-sans">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          {/* Mobile Dropdown Navigation */}
-          <div className="block lg:hidden w-full">
-            <label className="block text-[10px] font-extrabold text-blue-700 uppercase tracking-wider mb-1">Menu Navigasi Portal</label>
-            <select
-              value={activeTab}
-              onChange={(e) => setActiveTab(e.target.value)}
-              className="w-full bg-slate-50 border border-gray-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-800 focus:ring-2 focus:ring-blue-600 focus:bg-white cursor-pointer transition-all"
-            >
-              <option value="dashboard">📊 Dashboard Analitik</option>
-              <option value="projects">💼 Manajemen Project</option>
-              <option value="purchase_order">🛍️ Manajemen PO (Owner)</option>
-              <option value="pety_cash_request">📩 Pengajuan Petty Cash</option>
-              <option value="pety_cash_expense">💸 Pengeluaran Petty Cash</option>
-              <option value="salary">🪙 Input &amp; Slip Gaji Karyawan</option>
-              <option value="invoices">🏢 Manajemen Invoice (Tagihan)</option>
-              <option value="reports">📄 Laporan Project (Cetak Resmi)</option>
-              <option value="closed_recap">✓ Rekapan Closing Proyek</option>
-              <option value="backup">💾 Backup &amp; Restore Database</option>
-            </select>
-          </div>
-
-          {/* Desktop Tabs Navigation */}
-          <div className="hidden lg:flex items-center overflow-x-auto gap-2 pb-1 sm:pb-0 scrollbar-none">
-            
-            {/* Dashboard Tab */}
-            <button
-              onClick={() => setActiveTab("dashboard")}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap min-h-[44px] ${
-                activeTab === "dashboard"
-                  ? "bg-blue-600 text-white shadow-md shadow-blue-500/10"
-                  : "bg-gray-50 border border-gray-100 text-gray-600 hover:bg-gray-100"
-              }`}
-            >
-              <LayoutDashboard className="w-4 h-4" /> Dashboard Analitik
-            </button>
-
-            {/* Contract Projects Tab */}
-            <button
-              onClick={() => setActiveTab("projects")}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap min-h-[44px] ${
-                activeTab === "projects"
-                  ? "bg-blue-600 text-white shadow-md shadow-blue-500/10"
-                  : "bg-gray-50 border border-gray-100 text-gray-600 hover:bg-gray-100"
-              }`}
-            >
-              <Briefcase className="w-4 h-4" /> Manajemen Project
-            </button>
-
-            {/* Purchase Order (PO) Tab */}
-            <button
-              onClick={() => setActiveTab("purchase_order")}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap min-h-[44px] ${
-                activeTab === "purchase_order"
-                  ? "bg-blue-600 text-white shadow-md shadow-blue-500/10"
-                  : "bg-gray-50 border border-gray-100 text-gray-600 hover:bg-gray-100"
-              }`}
-            >
-              <ShoppingBag className="w-4 h-4" /> Manajemen PO
-            </button>
-
-            {/* Petty Cash Request Tab */}
-            <button
-              onClick={() => setActiveTab("pety_cash_request")}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap min-h-[44px] ${
-                activeTab === "pety_cash_request"
-                  ? "bg-blue-600 text-white shadow-md shadow-blue-500/10"
-                  : "bg-gray-50 border border-gray-100 text-gray-600 hover:bg-gray-100"
-              }`}
-            >
-              <Send className="w-4 h-4" /> Pengajuan Petty Cash
-              {transactions.filter((t) => t.type === "PetyCashRequest" && t.status === "Belum Proses").length > 0 && (
-                <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold leading-none ${
-                  activeTab === "pety_cash_request" ? "bg-white text-blue-600" : "bg-amber-100 text-amber-800"
-                }`}>
-                  {transactions.filter((t) => t.type === "PetyCashRequest" && t.status === "Belum Proses").length}
-                </span>
-              )}
-            </button>
-
-            {/* Petty Cash Expense Tab */}
-            <button
-              onClick={() => setActiveTab("pety_cash_expense")}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap min-h-[44px] ${
-                activeTab === "pety_cash_expense"
-                  ? "bg-blue-600 text-white shadow-md shadow-blue-500/10"
-                  : "bg-gray-50 border border-gray-100 text-gray-600 hover:bg-gray-100"
-              }`}
-            >
-              <Receipt className="w-4 h-4" /> Pengeluaran Petty Cash
-            </button>
-
-            {/* Input Gaji Tab */}
-            <button
-              onClick={() => setActiveTab("salary")}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap min-h-[44px] ${
-                activeTab === "salary"
-                  ? "bg-blue-600 text-white shadow-md shadow-blue-500/10"
-                  : "bg-gray-50 border border-gray-100 text-gray-600 hover:bg-gray-100"
-              }`}
-            >
-              <Coins className="w-4 h-4" /> Input Gaji Karyawan
-            </button>
-
-            {/* Invoice Management Tab */}
-            <button
-              onClick={() => setActiveTab("invoices")}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap min-h-[44px] ${
-                activeTab === "invoices"
-                  ? "bg-blue-600 text-white shadow-md shadow-blue-500/10"
-                  : "bg-gray-50 border border-gray-100 text-gray-600 hover:bg-gray-100"
-              }`}
-            >
-              <Landmark className="w-4 h-4" /> Manajemen Invoice
-            </button>
-
-            {/* Reports Tab */}
-            <button
-              onClick={() => setActiveTab("reports")}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap min-h-[44px] ${
-                activeTab === "reports"
-                  ? "bg-blue-600 text-white shadow-md shadow-blue-500/10"
-                  : "bg-gray-50 border border-gray-100 text-gray-600 hover:bg-gray-100"
-              }`}
-            >
-              <FileText className="w-4 h-4" /> Laporan Project
-            </button>
-
-            {/* Closing Recap Tab */}
-            <button
-              onClick={() => setActiveTab("closed_recap")}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap min-h-[44px] ${
-                activeTab === "closed_recap"
-                  ? "bg-blue-600 text-white shadow-md shadow-blue-500/10"
-                  : "bg-gray-50 border border-gray-100 text-gray-600 hover:bg-gray-100"
-              }`}
-            >
-              <CheckSquare className="w-4 h-4" /> Rekapan Closing
-              {projects.filter((p) => p.status === ProjectStatus.CLOSING).length > 0 && (
-                <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold leading-none ${
-                  activeTab === "closed_recap" ? "bg-white text-blue-600" : "bg-emerald-100 text-emerald-800"
-                }`}>
-                  {projects.filter((p) => p.status === ProjectStatus.CLOSING).length}
-                </span>
-              )}
-            </button>
-
-            {/* Backup & Restore Tab */}
-            <button
-              onClick={() => setActiveTab("backup")}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap min-h-[44px] ${
-                activeTab === "backup"
-                  ? "bg-blue-600 text-white shadow-md shadow-blue-500/10"
-                  : "bg-gray-50 border border-gray-100 text-gray-600 hover:bg-gray-100"
-              }`}
-            >
-              <Database className="w-4 h-4" /> Backup &amp; Restore
-            </button>
-
-          </div>
-        </div>
-      </nav>
-
-      {/* CORE WORKSPACE COMPONENT STAGE */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        {/* CORE WORKSPACE COMPONENT STAGE */}
+        <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
         
         {/* Active view switcher */}
         {activeTab === "dashboard" && (
@@ -1170,19 +1122,21 @@ export default function App() {
       </main>
 
       {/* FOOTER */}
-      <footer className="bg-slate-900 text-gray-400 border-t border-slate-800 py-6 text-center text-xs print:hidden">
+      <footer className="bg-white dark:bg-slate-900 text-gray-400 dark:text-gray-500 border-t border-slate-200 dark:border-slate-800 py-6 text-center text-xs print:hidden transition-all duration-300">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-2">
-          <p className="font-semibold text-slate-200">
+          <p className="font-semibold text-slate-800 dark:text-slate-200">
             {COMPANY_INFO.name} &mdash; Sistem Manajemen Keuangan Konstruksi
           </p>
-          <p className="text-[10px] text-gray-500 leading-relaxed max-w-lg mx-auto">
+          <p className="text-[10px] text-gray-400 dark:text-gray-500 leading-relaxed max-w-lg mx-auto font-medium">
             Aplikasi pelacak pengeluaran proyek real-time, laporan mingguan/bulanan formal ke jajaran direksi, peninjauan sisa pagu anggaran, dan alarm otomatis saat anggaran mendekati batas maksimal.
           </p>
-          <p className="text-[9px] text-gray-600 pt-1">
+          <p className="text-[9px] text-gray-400 dark:text-gray-600 pt-1 font-semibold">
             © {new Date().getFullYear()} CV. Mandiri Cipta Jaya. All Rights Reserved.
           </p>
         </div>
       </footer>
+
+    </div> {/* Closes <div className="flex-1 flex flex-col min-w-0 min-h-screen"> */}
 
       {/* CUSTOM RESET MODAL DIALOG */}
       {showResetModal && (

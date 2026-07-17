@@ -8,6 +8,19 @@ import { Project, Transaction, ProjectStatus, Category, ActivityLog } from "../t
 import { CATEGORIES } from "../data";
 import { TrendingUp, TrendingDown, Landmark, Wallet, AlertTriangle, FileSpreadsheet, Percent, BarChart3, Clock, CheckSquare, Plus, ShoppingBag, Send, Receipt, FileText, Activity } from "lucide-react";
 import { motion } from "motion/react";
+import {
+  ResponsiveContainer,
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  BarChart,
+  Bar,
+  Cell
+} from "recharts";
 
 interface DashboardProps {
   projects: Project[];
@@ -416,98 +429,52 @@ export default function Dashboard({
       {/* VISUAL CHARTS SECTION (SVG HAND-CRAFTED CHARTS) */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* TREND TREND MONTHLY EXPENDITURES AREA CHART */}
-        <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm space-y-4">
+        <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm space-y-4 transition-all duration-300">
           <div>
-            <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Tren Realisasi Biaya Bulanan</h3>
-            <p className="text-[11px] text-gray-500 mt-0.5">Akumulasi pengeluaran Petty Cash &amp; PO berdasarkan bulan kejadian.</p>
+            <h3 className="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Tren Realisasi Biaya Bulanan</h3>
+            <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">Akumulasi pengeluaran Petty Cash &amp; PO berdasarkan bulan kejadian.</p>
           </div>
 
-          {/* SVG Area Chart */}
-          <div className="h-64 relative flex flex-col justify-end">
-            <svg className="w-full h-48 overflow-visible" viewBox="0 0 500 200">
-              {/* Dynamic Grid Lines & Labels */}
-              {[0, 0.25, 0.5, 0.75, 1].map((ratio, index) => {
-                const maxTrendVal = Math.max(...monthlyTrend.map((m) => m.total), 10000000);
-                const y = 200 - ratio * 180;
-                const labelValue = ratio * maxTrendVal;
-                return (
-                  <g key={index}>
-                    <line
-                      x1="0"
-                      y1={y}
-                      x2="500"
-                      y2={y}
-                      stroke={index === 0 ? "#e2e8f0" : "#f1f5f9"}
-                      strokeWidth={index === 0 ? "1.5" : "1"}
-                    />
-                    <text
-                      x="4"
-                      y={y - 4}
-                      className="font-mono text-[9px] fill-gray-400 font-medium"
-                    >
-                      {formatShortVal(labelValue)}
-                    </text>
-                  </g>
-                );
-              })}
-
-              {/* Draw area and line path of trends */}
-              {(() => {
-                const maxVal = Math.max(...monthlyTrend.map((m) => m.total), 10000000);
-                const points = monthlyTrend.map((m, idx) => {
-                  const x = (idx / (monthlyTrend.length - 1)) * 500;
-                  const y = 200 - (m.total / maxVal) * 180;
-                  return { x, y, val: m.total, month: m.month };
-                });
-
-                const pathD = points.map((p, idx) => `${idx === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
-                const areaD = `${pathD} L ${points[points.length - 1].x} 200 L ${points[0].x} 200 Z`;
-
-                return (
-                  <>
-                    {/* Fill Area gradient */}
-                    <path d={areaD} fill="url(#blue-trend-grad)" opacity="0.1" />
-                    {/* Solid Line */}
-                    <path d={pathD} fill="none" stroke="#2563eb" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-
-                    {/* Nodes and markers */}
-                    {points.map((p, idx) => (
-                      <g key={idx}>
-                        <circle cx={p.x} cy={p.y} r="4.5" fill="#ffffff" stroke="#2563eb" strokeWidth="2.5" />
-                        <text x={p.x} y={p.y - 10} textAnchor="middle" className="font-mono text-[9px] font-bold fill-gray-600">
-                          {p.val > 0 ? formatShortVal(p.val) : ""}
-                        </text>
-                      </g>
-                    ))}
-                  </>
-                );
-              })()}
-
-              <defs>
-                <linearGradient id="blue-trend-grad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#2563eb" />
-                  <stop offset="100%" stopColor="#ffffff" />
-                </linearGradient>
-              </defs>
-            </svg>
-
-            {/* Labels under nodes */}
-            <div className="flex justify-between text-[10px] text-gray-400 font-medium px-1 mt-4">
-              {monthlyTrend.map((m, idx) => (
-                <span key={idx}>{m.month}</span>
-              ))}
-            </div>
+          <div className="h-64 relative flex items-center justify-center">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={monthlyTrend} margin={{ top: 10, right: 5, left: -20, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="colorTotal" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#2563eb" stopOpacity={0.2}/>
+                    <stop offset="95%" stopColor="#2563eb" stopOpacity={0}/>
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" className="dark:stroke-slate-800" />
+                <XAxis dataKey="month" tick={{ fontSize: 9, fontWeight: 500 }} stroke="#94a3b8" />
+                <YAxis tickFormatter={(val) => formatShortVal(val)} tick={{ fontSize: 9, fontWeight: 500 }} stroke="#94a3b8" />
+                <Tooltip 
+                  formatter={(val: number) => [formatIDR(val), "Pengeluaran"]}
+                  contentStyle={{ 
+                    backgroundColor: "#1e293b", 
+                    borderColor: "#334155", 
+                    borderRadius: "12px", 
+                    fontSize: "11px",
+                    color: "#f8fafc",
+                    fontWeight: "600",
+                    boxShadow: "0 4px 12px rgba(0, 0, 0, 0.1)"
+                  }}
+                  itemStyle={{ color: "#f1f5f9" }}
+                  labelStyle={{ color: "#94a3b8" }}
+                />
+                <Area type="monotone" dataKey="total" stroke="#2563eb" fillOpacity={1} fill="url(#colorTotal)" strokeWidth={2.5} />
+              </AreaChart>
+            </ResponsiveContainer>
           </div>
         </div>
 
         {/* CATEGORY EXPENDITURES HORIZONTAL BAR CHART */}
-        <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm space-y-4">
+        <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm space-y-4 transition-all duration-300">
           <div className="flex justify-between items-center">
             <div>
-              <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Distribusi Biaya Berdasarkan Kategori</h3>
-              <p className="text-[11px] text-gray-500 mt-0.5">Urutan pengeluaran terbesar dari buku kas pety cash.</p>
+              <h3 className="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Distribusi Biaya Berdasarkan Kategori</h3>
+              <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">Urutan pengeluaran terbesar dari buku kas pety cash.</p>
             </div>
-            <span className="text-[10px] bg-slate-100 text-slate-700 px-2 py-0.5 rounded font-mono font-bold uppercase">
+            <span className="text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-2.5 py-1 rounded-xl font-mono font-bold uppercase">
               {categorySpending.length} Kategori
             </span>
           </div>
@@ -523,13 +490,13 @@ export default function Dashboard({
                 const ratio = (item.total / maxVal) * 100;
 
                 return (
-                  <div key={item.category} className="space-y-1">
-                    <div className="flex justify-between items-center text-xs">
-                      <span className="font-semibold text-slate-800">{item.category}</span>
-                      <span className="font-mono text-gray-600 text-[11px] font-bold">{formatIDR(item.total)}</span>
+                  <div key={item.category} className="space-y-1.5">
+                    <div className="flex justify-between items-center text-xs font-semibold">
+                      <span className="text-slate-700 dark:text-slate-300">{item.category}</span>
+                      <span className="font-mono text-slate-950 dark:text-slate-100 font-bold">{formatIDR(item.total)}</span>
                     </div>
-                    <div className="w-full bg-gray-100 h-2.5 rounded-full overflow-hidden">
-                      <div className="bg-slate-800 h-full rounded-full" style={{ width: `${ratio}%` }} />
+                    <div className="w-full bg-slate-100 dark:bg-slate-800 h-2.5 rounded-full overflow-hidden">
+                      <div className="bg-slate-800 dark:bg-blue-500 h-full rounded-full transition-all duration-500" style={{ width: `${ratio}%` }} />
                     </div>
                   </div>
                 );
@@ -594,160 +561,66 @@ export default function Dashboard({
           </div>
         </div>
 
-        {/* Dynamic Responsive SVG Bar Chart */}
+        {/* Dynamic Responsive Bar Chart */}
         {filteredProjectBudgetData.length === 0 ? (
           <div className="py-12 text-center text-xs text-gray-400 italic">
             Belum ada data proyek aktif untuk dibandingkan atau filter salah.
           </div>
         ) : (
           <div className="space-y-6">
-            <div className="overflow-x-auto pb-4 scrollbar-thin scrollbar-thumb-gray-200">
-              {(() => {
-                const chartWidth = Math.max(760, filteredProjectBudgetData.length * 150);
-                const chartHeight = 240;
-                const maxVal = Math.max(
-                  ...filteredProjectBudgetData.map((d) => Math.max(d.contractVal, d.spending)),
-                  100000000 // min 100M for reasonable scaling
-                );
-
-                return (
-                  <div style={{ minWidth: `${chartWidth}px` }} className="w-full relative">
-                    <svg className="w-full h-64 overflow-visible" viewBox={`0 0 ${chartWidth} ${chartHeight}`}>
-                      {/* Grid Lines & Labels */}
-                      {[0, 0.25, 0.5, 0.75, 1].map((ratio, index) => {
-                        const y = 20 + (1 - ratio) * 160;
-                        const labelValue = ratio * maxVal;
-                        return (
-                          <g key={index}>
-                            <line
-                              x1="0"
-                              y1={y}
-                              x2={chartWidth}
-                              y2={y}
-                              stroke="#f1f5f9"
-                              strokeWidth="1"
-                            />
-                            <text
-                              x="4"
-                              y={y - 4}
-                              className="font-mono text-[9px] fill-gray-400 font-medium"
-                            >
-                              {formatShortVal(labelValue)}
-                            </text>
-                          </g>
-                        );
-                      })}
-                      <line x1="0" y1="180" x2={chartWidth} y2="180" stroke="#cbd5e1" strokeWidth="1.5" />
-
-                      {/* Project Bars Group */}
-                      {filteredProjectBudgetData.map((proj, idx) => {
-                        const groupWidth = chartWidth / filteredProjectBudgetData.length;
-                        const groupCenterX = (idx * groupWidth) + (groupWidth / 2);
-                        const barWidth = 24;
-                        const gap = 5;
-
-                        const contractHeight = (proj.contractVal / maxVal) * 160;
-                        const spendingHeight = (proj.spending / maxVal) * 160;
-
-                        const x1 = groupCenterX - barWidth - gap / 2;
-                        const x2 = groupCenterX + gap / 2;
-
-                        // Calculate spending bar color based on warnings
-                        let barColor = "#10b981"; // emerald-500 (Aman)
-                        if (proj.isOverBudget) {
-                          barColor = "#ef4444"; // red-500 (Kritis)
-                        } else if (proj.isNearingThreshold) {
-                          barColor = "#f59e0b"; // amber-500 (Peringatan)
-                        }
-
-                        return (
-                          <g key={proj.id} className="group">
-                            {/* Bar 1: Contract Value (Indigo) */}
-                            <rect
-                              x={x1}
-                              y={180 - contractHeight}
-                              width={barWidth}
-                              height={Math.max(2, contractHeight)}
-                              fill="#4f46e5"
-                              rx="4"
-                              className="transition-all duration-300 hover:opacity-90"
-                            />
-                            {proj.contractVal > 0 && (
-                              <text
-                                x={x1 + barWidth / 2}
-                                y={Math.min(170, 180 - contractHeight - 6)}
-                                textAnchor="middle"
-                                className="font-mono text-[9px] font-bold fill-indigo-700"
-                              >
-                                {formatShortVal(proj.contractVal)}
-                              </text>
-                            )}
-
-                            {/* Bar 2: Actual Spending */}
-                            <rect
-                              x={x2}
-                              y={180 - spendingHeight}
-                              width={barWidth}
-                              height={Math.max(2, spendingHeight)}
-                              fill={barColor}
-                              rx="4"
-                              className="transition-all duration-300 hover:opacity-90"
-                            />
-                            {proj.spending > 0 && (
-                              <text
-                                x={x2 + barWidth / 2}
-                                y={Math.min(170, 180 - spendingHeight - 6)}
-                                textAnchor="middle"
-                                className="font-mono text-[9px] font-bold"
-                                fill={barColor === "#10b981" ? "#065f46" : barColor === "#f59e0b" ? "#92400e" : "#991b1b"}
-                              >
-                                {formatShortVal(proj.spending)}
-                              </text>
-                            )}
-
-                            {/* X-Axis labels inside the group */}
-                            <text
-                              x={groupCenterX}
-                              y="205"
-                              textAnchor="middle"
-                              className="font-sans text-[11px] font-bold fill-slate-800"
-                            >
-                              {proj.code.split(".").slice(1, 3).join(".") || proj.code}
-                            </text>
-                            <text
-                              x={groupCenterX}
-                              y="222"
-                              textAnchor="middle"
-                              className="font-sans text-[9px] fill-gray-400 font-medium truncate max-w-[140px]"
-                            >
-                              {proj.name.length > 20 ? proj.name.substring(0, 18) + "..." : proj.name}
-                            </text>
-                          </g>
-                        );
-                      })}
-                    </svg>
-                  </div>
-                );
-              })()}
+            <div className="h-72 relative flex items-center justify-center">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={filteredProjectBudgetData} margin={{ top: 20, right: 5, left: -20, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" className="dark:stroke-slate-800" />
+                  <XAxis dataKey="code" tick={{ fontSize: 9, fontWeight: 600 }} stroke="#94a3b8" />
+                  <YAxis tickFormatter={(val) => formatShortVal(val)} tick={{ fontSize: 9, fontWeight: 600 }} stroke="#94a3b8" />
+                  <Tooltip
+                    formatter={(value: number, name: string) => [formatIDR(value), name === "contractVal" ? "Nilai Kontrak" : "Realisasi Biaya"]}
+                    contentStyle={{ 
+                      backgroundColor: "#1e293b", 
+                      borderColor: "#334155", 
+                      borderRadius: "12px", 
+                      fontSize: "11px",
+                      color: "#f8fafc",
+                      fontWeight: "600",
+                      boxShadow: "0 4px 12px rgba(0, 0, 0, 0.1)"
+                    }}
+                    itemStyle={{ color: "#f1f5f9" }}
+                    labelStyle={{ color: "#94a3b8" }}
+                  />
+                  <Bar dataKey="contractVal" name="Nilai Kontrak" fill="#4f46e5" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="spending" name="Realisasi Biaya" radius={[4, 4, 0, 0]}>
+                    {filteredProjectBudgetData.map((entry, index) => {
+                      let barColor = "#10b981"; // Aman
+                      if (entry.isOverBudget) {
+                        barColor = "#ef4444"; // Over
+                      } else if (entry.isNearingThreshold) {
+                        barColor = "#f59e0b"; // Warning
+                      }
+                      return <Cell key={`cell-${index}`} fill={barColor} />;
+                    })}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
             </div>
 
             {/* Structured Table/Grid of Project Budgets for Deep Analysis */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {filteredProjectBudgetData.map((proj) => {
-                let statusBg = "bg-emerald-50 text-emerald-700 border border-emerald-200";
+                let statusBg = "bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-900/50";
                 let statusLabel = "Aman";
                 if (proj.isOverBudget) {
-                  statusBg = "bg-red-50 text-red-700 border border-red-200";
+                  statusBg = "bg-red-50 text-red-700 border border-red-200 dark:bg-red-950/40 dark:text-red-400 dark:border-red-900/50";
                   statusLabel = "Kritis (Over Budget)";
                 } else if (proj.isNearingThreshold) {
-                  statusBg = "bg-amber-50 text-amber-700 border border-amber-200";
+                  statusBg = "bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-900/50";
                   statusLabel = `Warning (>${proj.threshold}%)`;
                 }
 
                 return (
                   <div
                     key={proj.id}
-                    className="p-4 bg-slate-50 border border-gray-200 rounded-xl space-y-3 shadow-xs hover:border-gray-300 hover:bg-slate-100/50 transition-all cursor-pointer"
+                    className="p-4 bg-slate-50 dark:bg-slate-900/50 border border-gray-200 dark:border-slate-800 rounded-xl space-y-3 shadow-xs hover:border-gray-300 dark:hover:border-slate-700 hover:bg-slate-100/50 dark:hover:bg-slate-900 transition-all cursor-pointer"
                     onClick={() => {
                       setSelectedProjectId(proj.id);
                       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -755,8 +628,8 @@ export default function Dashboard({
                   >
                     <div className="flex justify-between items-start gap-2">
                       <div className="min-w-0">
-                        <span className="text-[10px] font-mono font-bold text-blue-600 block">{proj.code}</span>
-                        <h4 className="font-bold text-xs text-slate-900 tracking-tight line-clamp-1">{proj.name}</h4>
+                        <span className="text-[10px] font-mono font-bold text-blue-600 dark:text-blue-400 block">{proj.code}</span>
+                        <h4 className="font-bold text-xs text-slate-900 dark:text-slate-100 tracking-tight line-clamp-1">{proj.name}</h4>
                       </div>
                       <span className={`text-[9px] font-extrabold px-2 py-0.5 rounded-full uppercase whitespace-nowrap ${statusBg}`}>
                         {statusLabel}
@@ -764,22 +637,22 @@ export default function Dashboard({
                     </div>
 
                     <div className="space-y-1.5 text-xs">
-                      <div className="flex justify-between text-gray-500">
+                      <div className="flex justify-between text-gray-500 dark:text-gray-400">
                         <span>Nilai Kontrak Dasar:</span>
-                        <span className="font-mono font-semibold text-slate-800">{formatIDR(proj.contractVal)}</span>
+                        <span className="font-mono font-semibold text-slate-800 dark:text-slate-200">{formatIDR(proj.contractVal)}</span>
                       </div>
-                      <div className="flex justify-between text-gray-500">
+                      <div className="flex justify-between text-gray-500 dark:text-gray-400">
                         <span>Realisasi Pengeluaran:</span>
-                        <span className="font-mono font-semibold text-red-600">{formatIDR(proj.spending)}</span>
+                        <span className="font-mono font-semibold text-red-600 dark:text-red-400">{formatIDR(proj.spending)}</span>
                       </div>
                       
                       {/* Micro Progress Bar */}
                       <div className="pt-1.5 space-y-1">
-                        <div className="flex justify-between text-[10px] font-bold text-slate-600">
+                        <div className="flex justify-between text-[10px] font-bold text-slate-600 dark:text-slate-400">
                           <span>Rasio Terpakai:</span>
                           <span>{proj.ratio.toFixed(1)}%</span>
                         </div>
-                        <div className="w-full bg-gray-200 h-1.5 rounded-full overflow-hidden">
+                        <div className="w-full bg-gray-200 dark:bg-slate-800 h-1.5 rounded-full overflow-hidden">
                           <div
                             className={`h-full rounded-full transition-all duration-300 ${
                               proj.isOverBudget

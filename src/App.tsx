@@ -50,6 +50,7 @@ import NotificationCenter from "./components/NotificationCenter";
 import InvoiceManager from "./components/InvoiceManager";
 import BackupManager from "./components/BackupManager";
 import SalaryManager from "./components/SalaryManager";
+import { io } from "socket.io-client";
 // No custom logo import needed
 
 export default function App() {
@@ -120,6 +121,16 @@ export default function App() {
   const [rememberMe, setRememberMe] = useState(false);
   const [loginLoading, setLoginLoading] = useState(false);
   const [showForgotPassword, setShowForgotPassword] = useState(false);
+
+  // PUBLIC REGISTER STATES
+  const [loginTab, setLoginTab] = useState<"login" | "register">("login");
+  const [regUsername, setRegUsername] = useState("");
+  const [regFullName, setRegFullName] = useState("");
+  const [regPassword, setRegPassword] = useState("");
+  const [regRole, setRegRole] = useState("karyawan");
+  const [regError, setRegError] = useState<string | null>(null);
+  const [regSuccess, setRegSuccess] = useState<string | null>(null);
+  const [regLoading, setRegLoading] = useState(false);
 
   // USER MANAGEMENT STATES
   const [userList, setUserList] = useState<{ username: string; fullName: string; role: string }[]>([]);
@@ -420,6 +431,53 @@ export default function App() {
     return () => clearInterval(pollInterval);
   }, [serverLastUpdated]);
 
+  // Real-time socket updates
+  useEffect(() => {
+    if (!userRole) return;
+
+    const socket = io();
+
+    socket.on("connect", () => {
+      console.log("Connected to Socket.IO real-time server");
+    });
+
+    socket.on("data_updated", async (status: { lastUpdated: number }) => {
+      if (status.lastUpdated > serverLastUpdated) {
+        if (isSyncingRef.current) return;
+        isSyncingRef.current = true;
+        try {
+          const dataRes = await fetch("/api/data", {
+            headers: getAuthHeaders()
+          });
+          if (dataRes.status === 401) {
+            handleLogout();
+            return;
+          }
+          const data = await dataRes.json();
+          setProjects(Array.isArray(data?.projects) ? data.projects : []);
+          setTransactions(Array.isArray(data?.transactions) ? data.transactions : []);
+          setActivities(Array.isArray(data?.activities) ? data.activities : []);
+          setCategories(Array.isArray(data?.categories) ? data.categories : categories);
+          setServerLastUpdated(typeof data?.lastUpdated === "number" ? data.lastUpdated : Date.now());
+          
+          await fetchUsers();
+        } catch (err) {
+          console.error("Socket update fetch failed:", err);
+        } finally {
+          isSyncingRef.current = false;
+        }
+      }
+    });
+
+    socket.on("users_updated", async () => {
+      await fetchUsers();
+    });
+
+    return () => {
+      socket.disconnect();
+    };
+  }, [userRole, serverLastUpdated]);
+
   const addActivity = (
     type: "project" | "po" | "petycash_request" | "petycash_expense" | "invoice",
     action: string,
@@ -565,6 +623,64 @@ export default function App() {
 
   const activeAlertsCount = alerts.filter((a) => !a.isRead).length;
 
+  const handleRegisterSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setRegError(null);
+    setRegSuccess(null);
+
+    const username = regUsername.trim().toLowerCase().replace(/\s+/g, "");
+    const fullName = regFullName.trim();
+    const password = regPassword;
+    const role = regRole;
+
+    if (!username || !fullName || !password || !role) {
+      setRegError("Semua kolom wajib diisi!");
+      return;
+    }
+
+    if (password.length < 4) {
+      setRegError("Password minimal harus memiliki panjang 4 karakter!");
+      return;
+    }
+
+    setRegLoading(true);
+
+    try {
+      const res = await fetch("/api/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, fullName, password, role })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setRegSuccess("Pendaftaran berhasil! Akun karyawan Anda siap digunakan.");
+        setAppToast({ message: "Registrasi akun berhasil! Silakan masuk.", type: "success" });
+        
+        // Auto-fill login fields for convenience
+        setUsernameInput(username);
+        setPasswordInput(password);
+        
+        // Clear registration form
+        setRegUsername("");
+        setRegFullName("");
+        setRegPassword("");
+        
+        // Switch to login tab after 1.5 seconds
+        setTimeout(() => {
+          setLoginTab("login");
+          setRegSuccess(null);
+        }, 1500);
+      } else {
+        setRegError(data.message || "Gagal melakukan pendaftaran.");
+      }
+    } catch (err) {
+      console.error(err);
+      setRegError("Koneksi gagal ke server pendaftaran.");
+    } finally {
+      setRegLoading(false);
+    }
+  };
+
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError(null);
@@ -664,7 +780,7 @@ export default function App() {
         <div className="w-full max-w-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-8 shadow-xl dark:shadow-2xl relative z-10 transition-all">
           
           {/* Logo & Header */}
-          <div className="text-center mb-8">
+          <div className="text-center mb-6">
             <div className="mx-auto inline-flex px-4 h-12 bg-blue-600 dark:bg-blue-500 rounded-xl items-center justify-center text-white text-base font-black shadow-md shadow-blue-500/20 mb-4 select-none">
               MCJxEJT
             </div>
@@ -673,19 +789,19 @@ export default function App() {
               CV. Mandiri Cipta Jaya <span className="text-blue-500 font-extrabold">&times;</span> PT. Elqia Jaya Teknik
             </p>
           </div>
- 
+
           {/* Form */}
           <form
             onSubmit={handleLoginSubmit}
             className="space-y-5"
           >
             {loginError && (
-              <div className="p-3.5 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-500/20 rounded-xl text-xs text-red-600 dark:text-red-400 flex items-center gap-2.5 animate-pulse">
+              <div className="p-3.5 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-500/20 rounded-xl text-xs text-red-600 dark:text-red-400 flex items-center gap-2.5 animate-pulse font-medium">
                 <AlertTriangle className="w-4 h-4 shrink-0" />
-                <span className="font-medium">{loginError}</span>
+                <span>{loginError}</span>
               </div>
             )}
- 
+   
             <div className="space-y-1.5">
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">Username</label>
               <input
@@ -693,11 +809,11 @@ export default function App() {
                 placeholder="Masukkan username"
                 value={usernameInput}
                 onChange={(e) => setUsernameInput(e.target.value)}
-                className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-3 text-sm text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all font-sans"
+                className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-3 text-sm text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all font-sans font-semibold"
                 required
               />
             </div>
- 
+   
             <div className="space-y-1.5">
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">Password</label>
               <div className="relative">
@@ -718,7 +834,7 @@ export default function App() {
                 </button>
               </div>
             </div>
- 
+   
             {/* Remember Me and Forgot Password */}
             <div className="flex items-center justify-between text-xs pt-1">
               <label className="flex items-center gap-2 text-slate-600 dark:text-slate-300 cursor-pointer select-none">
@@ -738,7 +854,7 @@ export default function App() {
                 Lupa Password?
               </button>
             </div>
- 
+   
             <button
               type="submit"
               disabled={loginLoading}

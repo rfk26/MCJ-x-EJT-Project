@@ -6,7 +6,7 @@
 import React from "react";
 import { Project, Transaction, Category, ProjectStatus } from "../types";
 import { COMPANY_INFO } from "../data";
-import { Plus, ListFilter, Search, FileText, ShoppingBag, Trash2, HelpCircle, AlertTriangle, ShieldCheck, Landmark, Briefcase, Percent, CheckCircle2, Coins } from "lucide-react";
+import { Plus, ListFilter, Search, FileText, ShoppingBag, Trash2, HelpCircle, AlertTriangle, ShieldCheck, Landmark, Briefcase, Percent, CheckCircle2, Coins, Edit } from "lucide-react";
 import { motion } from "motion/react";
 
 interface PurchaseOrderManagerProps {
@@ -35,6 +35,8 @@ export default function PurchaseOrderManager({
   isReadOnly = false,
 }: PurchaseOrderManagerProps) {
   const [showAddForm, setShowAddForm] = React.useState(false);
+  const [editingPoId, setEditingPoId] = React.useState<string | null>(null);
+  const isRestoringRef = React.useRef(false);
 
   // Link to existing project state
   const [linkProjectId, setLinkProjectId] = React.useState<string>("new");
@@ -49,6 +51,7 @@ export default function PurchaseOrderManager({
 
   // Sync with selected existing project
   React.useEffect(() => {
+    if (isRestoringRef.current || editingPoId) return;
     if (linkProjectId && linkProjectId !== "new") {
       const foundProj = projects.find((p) => p.id === linkProjectId);
       if (foundProj) {
@@ -125,6 +128,75 @@ export default function PurchaseOrderManager({
     }
   }, [alertMessage]);
 
+  // AUTO-SAVE & AUTO-LOAD DRAFT FOR PURCHASE ORDER FORM
+  React.useEffect(() => {
+    const savedDraft = localStorage.getItem("purchase_order_draft");
+    if (savedDraft) {
+      try {
+        const draft = JSON.parse(savedDraft);
+        if (draft) {
+          isRestoringRef.current = true;
+          if (draft.linkProjectId) setLinkProjectId(draft.linkProjectId);
+          if (draft.poNo) setPoNo(draft.poNo);
+          if (draft.projectName) setProjectName(draft.projectName);
+          if (draft.projectCode) setProjectCode(draft.projectCode);
+          if (draft.supplier) setSupplier(draft.supplier);
+          if (draft.pic) setPic(draft.pic);
+          if (draft.date) setDate(draft.date);
+          if (draft.contractItems) setContractItems(draft.contractItems);
+          if (draft.description) setDescription(draft.description);
+          if (draft.status) setStatus(draft.status);
+          if (draft.company) setCompany(draft.company);
+          if (draft.customCompany) setCustomCompany(draft.customCompany);
+          if (draft.pphPercentInput !== undefined) setPphPercentInput(draft.pphPercentInput);
+          if (draft.showAddForm !== undefined) setShowAddForm(draft.showAddForm);
+          setTimeout(() => {
+            isRestoringRef.current = false;
+          }, 100);
+        }
+      } catch (err) {
+        console.error("Error loading purchase order draft", err);
+      }
+    }
+  }, []);
+
+  React.useEffect(() => {
+    if (editingPoId) return;
+    const draft = {
+      linkProjectId,
+      poNo,
+      projectName,
+      projectCode,
+      supplier,
+      pic,
+      date,
+      contractItems,
+      description,
+      status,
+      company,
+      customCompany,
+      pphPercentInput,
+      showAddForm
+    };
+    localStorage.setItem("purchase_order_draft", JSON.stringify(draft));
+  }, [
+    linkProjectId,
+    poNo,
+    projectName,
+    projectCode,
+    supplier,
+    pic,
+    date,
+    contractItems,
+    description,
+    status,
+    company,
+    customCompany,
+    pphPercentInput,
+    showAddForm,
+    editingPoId
+  ]);
+
   const formatIDR = (val: number) => {
     return new Intl.NumberFormat("id-ID", {
       style: "currency",
@@ -181,10 +253,141 @@ export default function PurchaseOrderManager({
 
     setValidationError(null);
 
-    const targetProjectId = linkProjectId === "new" ? `proj-${Date.now()}` : linkProjectId;
+    const oldPO = editingPoId ? transactions.find(t => t.id === editingPoId) : null;
+    let projectsTemp = [...projects];
+
+    // Ensure HO MCJ and HO EJT projects exist
+    let hasHoMcj = projectsTemp.some((p) => p.name.toUpperCase().trim() === "HO MCJ" || p.code.toUpperCase().trim() === "HO.MCJ.2026");
+    if (!hasHoMcj) {
+      const hoMcjProject: Project = {
+        id: "proj-ho-mcj",
+        name: "HO MCJ",
+        code: "HO.MCJ.2026",
+        manager: "Direksi",
+        pic: "Direksi",
+        status: ProjectStatus.PROGRES,
+        startDate: "2026-01-01",
+        expectedProfitPercent: 100,
+        contractValue: { piping: 0, electrical: 0, mechanical: 0, scafolder: 0, welder: 0 },
+        ppnPercent: 0,
+        pphPercent: 0,
+        budgetThresholdPercent: 100,
+        company: "CV. Mandiri Cipta Jaya",
+        customContractItems: [],
+        notes: "Head Office CV. Mandiri Cipta Jaya"
+      };
+      projectsTemp = [hoMcjProject, ...projectsTemp];
+    }
+
+    let hasHoEjt = projectsTemp.some((p) => p.name.toUpperCase().trim() === "HO EJT" || p.code.toUpperCase().trim() === "HO.EJT.2026");
+    if (!hasHoEjt) {
+      const hoEjtProject: Project = {
+        id: "proj-ho-ejt",
+        name: "HO EJT",
+        code: "HO.EJT.2026",
+        manager: "Direksi",
+        pic: "Direksi",
+        status: ProjectStatus.PROGRES,
+        startDate: "2026-01-01",
+        expectedProfitPercent: 100,
+        contractValue: { piping: 0, electrical: 0, mechanical: 0, scafolder: 0, welder: 0 },
+        ppnPercent: 0,
+        pphPercent: 0,
+        budgetThresholdPercent: 100,
+        company: "PT. Elqia Jaya Teknik",
+        customContractItems: [],
+        notes: "Head Office PT. Elqia Jaya Teknik"
+      };
+      projectsTemp = [hoEjtProject, ...projectsTemp];
+    }
+
+    // If editing, subtract old PO values from the old project first to maintain consistency
+    if (oldPO && oldPO.projectId) {
+      const oldProjId = oldPO.projectId;
+      const oldItemsToSubtract = oldPO.contractItems || [];
+
+      projectsTemp = projectsTemp.map((proj) => {
+        if (proj.id === oldProjId) {
+          let updatedCustomItems = proj.customContractItems
+            ? proj.customContractItems.map((item) => ({ ...item }))
+            : [];
+          oldItemsToSubtract.forEach((subItem) => {
+            const match = updatedCustomItems.find(
+              (item) => item.name.toLowerCase().trim() === subItem.name.toLowerCase().trim()
+            );
+            if (match) {
+              match.value = Math.max(0, Number(match.value || 0) - Number(subItem.value || 0));
+            }
+          });
+
+          const subPiping = Number(oldItemsToSubtract.find(i => i.name.toLowerCase().includes("piping") || i.id === "piping" || i.id === "1")?.value || 0);
+          const subElectrical = Number(oldItemsToSubtract.find(i => i.name.toLowerCase().includes("elect") || i.id === "electrical" || i.id === "2")?.value || 0);
+          const subMechanical = Number(oldItemsToSubtract.find(i => i.name.toLowerCase().includes("mech") || i.id === "mechanical" || i.id === "3")?.value || 0);
+          const subScafolder = Number(oldItemsToSubtract.find(i => i.name.toLowerCase().includes("scaf") || i.id === "scafolder" || i.id === "4")?.value || 0);
+          const subWelder = Number(oldItemsToSubtract.find(i => i.name.toLowerCase().includes("weld") || i.id === "welder" || i.id === "5")?.value || 0);
+
+          const pipingVal = Math.max(0, (proj.contractValue?.piping || 0) - subPiping);
+          const electricalVal = Math.max(0, (proj.contractValue?.electrical || 0) - subElectrical);
+          const mechanicalVal = Math.max(0, (proj.contractValue?.mechanical || 0) - subMechanical);
+          const scafolderVal = Math.max(0, (proj.contractValue?.scafolder || 0) - subScafolder);
+          const welderVal = Math.max(0, (proj.contractValue?.welder || 0) - subWelder);
+
+          let existingPoList = proj.poNo ? proj.poNo.split(", ").map(p => p.trim()) : [];
+          if (oldPO.poNo) {
+            existingPoList = existingPoList.filter(p => p !== oldPO.poNo.trim());
+          }
+          const updatedPoNo = existingPoList.join(", ");
+
+          return {
+            ...proj,
+            poNo: updatedPoNo,
+            customContractItems: updatedCustomItems,
+            contractValue: {
+              piping: pipingVal,
+              electrical: electricalVal,
+              mechanical: mechanicalVal,
+              scafolder: scafolderVal,
+              welder: welderVal,
+            }
+          };
+        }
+        return proj;
+      });
+    }
+
+    const targetProjectId = linkProjectId === "new" ? (oldPO ? oldPO.projectId : `proj-${Date.now()}`) : linkProjectId;
     const updatedCompany = company === "Lainnya" ? customCompany : company;
 
-    // 1. Create or Update the project
+    const cutAmount = Math.round(totalContractValue * 0.02);
+    const finalPoAmount = totalContractValue - cutAmount;
+    const targetPoId = editingPoId ? editingPoId : `po-${Date.now()}`;
+
+    let targetHoProj: Project | undefined = undefined;
+    if (updatedCompany === "CV. Mandiri Cipta Jaya") {
+      targetHoProj = projectsTemp.find((p) => p.name.toUpperCase().trim() === "HO MCJ" || p.code.toUpperCase().trim() === "HO.MCJ.2026");
+    } else if (updatedCompany === "PT. Elqia Jaya Teknik") {
+      targetHoProj = projectsTemp.find((p) => p.name.toUpperCase().trim() === "HO EJT" || p.code.toUpperCase().trim() === "HO.EJT.2026");
+    }
+
+    let hoTx: Transaction | null = null;
+    if (targetHoProj) {
+      hoTx = {
+        id: `po-ho-cut-${targetPoId}`,
+        projectId: targetHoProj.id,
+        type: "Invoice",
+        pic: pic || "Sistem Otomatis",
+        date: date,
+        invoiceNo: `HO-2%-${poNo}`,
+        poNo: poNo,
+        status: "Sudah Proses",
+        description: `Penerimaan Dana 2% dari PO ${poNo} - ${description}`,
+        category: "Dana 2%",
+        amount: cutAmount,
+        company: updatedCompany,
+      };
+    }
+
+    // Apply new values to target project
     if (linkProjectId === "new") {
       const pipingItem = contractItems.find(i => i.name.toLowerCase().includes("piping") || i.id === "piping" || i.id === "1");
       const electricalItem = contractItems.find(i => i.name.toLowerCase().includes("elect") || i.id === "electrical" || i.id === "2");
@@ -192,147 +395,213 @@ export default function PurchaseOrderManager({
       const scafolderItem = contractItems.find(i => i.name.toLowerCase().includes("scaf") || i.id === "scafolder" || i.id === "4");
       const welderItem = contractItems.find(i => i.name.toLowerCase().includes("weld") || i.id === "welder" || i.id === "5");
 
-      const newProject: Project = {
-        id: targetProjectId,
-        name: projectName,
-        code: projectCode,
-        manager: pic, // PIC as Project Manager
-        pic: pic,
-        status: ProjectStatus.PROGRES,
-        startDate: date,
-        expectedProfitPercent: 35, // default
-        contractValue: {
-          piping: Number(pipingItem?.value || 0),
-          electrical: Number(electricalItem?.value || 0),
-          mechanical: Number(mechanicalItem?.value || 0),
-          scafolder: Number(scafolderItem?.value || 0),
-          welder: Number(welderItem?.value || 0),
-        },
-        contractNames: {
-          piping: pipingItem?.name || "Piping",
-          electrical: electricalItem?.name || "Electrical",
-          mechanical: mechanicalItem?.name || "Mechanical",
-          scafolder: scafolderItem?.name || "Scafolder",
-          welder: welderItem?.name || "Welder",
-        },
-        ppnPercent: 11,
-        pphPercent: pphPercentInput,
-        budgetThresholdPercent: 85,
-        notes: description,
-        company: updatedCompany,
-        poNo: poNo,
-        customContractItems: contractItems,
-      };
-      setProjects((prev) => [newProject, ...prev]);
-    } else {
-      // Update existing project in Project Management (Accumulate PO value)
-      setProjects((prev) =>
-        prev.map((proj) => {
-          if (proj.id === linkProjectId) {
-            // Retrieve existing custom contract items or build from contractValue
-            let existingItems = proj.customContractItems ? [...proj.customContractItems] : [];
-            if (existingItems.length === 0) {
-              existingItems = [
-                { id: "piping", name: proj.contractNames?.piping || "Piping", value: proj.contractValue?.piping || 0 },
-                { id: "electrical", name: proj.contractNames?.electrical || "Electrical", value: proj.contractValue?.electrical || 0 },
-                { id: "mechanical", name: proj.contractNames?.mechanical || "Mechanical", value: proj.contractValue?.mechanical || 0 },
-                { id: "scafolder", name: proj.contractNames?.scafolder || "Scafolder", value: proj.contractValue?.scafolder || 0 },
-                { id: "welder", name: proj.contractNames?.welder || "Welder", value: proj.contractValue?.welder || 0 },
-              ];
-            }
-
-            const mergedItems = existingItems.map((item) => ({ ...item }));
-
-            contractItems.forEach((newItem) => {
-              const match = mergedItems.find(
-                (item) => item.name.toLowerCase().trim() === newItem.name.toLowerCase().trim()
-              );
-              if (match) {
-                match.value = Number(match.value || 0) + Number(newItem.value || 0);
-              } else {
-                const isIdTaken = mergedItems.some((item) => item.id === newItem.id);
-                const uniqueId = (isIdTaken || !newItem.id)
-                  ? `item-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`
-                  : newItem.id;
-                mergedItems.push({
-                  id: uniqueId,
-                  name: newItem.name,
-                  value: Number(newItem.value || 0),
-                });
-              }
-            });
-
-            // Sum up standard categories for the contractValue field
-            const poPiping = Number(contractItems.find(i => i.name.toLowerCase().includes("piping") || i.id === "piping" || i.id === "1")?.value || 0);
-            const poElectrical = Number(contractItems.find(i => i.name.toLowerCase().includes("elect") || i.id === "electrical" || i.id === "2")?.value || 0);
-            const poMechanical = Number(contractItems.find(i => i.name.toLowerCase().includes("mech") || i.id === "mechanical" || i.id === "3")?.value || 0);
-            const poScafolder = Number(contractItems.find(i => i.name.toLowerCase().includes("scaf") || i.id === "scafolder" || i.id === "4")?.value || 0);
-            const poWelder = Number(contractItems.find(i => i.name.toLowerCase().includes("weld") || i.id === "welder" || i.id === "5")?.value || 0);
-
-            const pipingVal = (proj.contractValue?.piping || 0) + poPiping;
-            const electricalVal = (proj.contractValue?.electrical || 0) + poElectrical;
-            const mechanicalVal = (proj.contractValue?.mechanical || 0) + poMechanical;
-            const scafolderVal = (proj.contractValue?.scafolder || 0) + poScafolder;
-            const welderVal = (proj.contractValue?.welder || 0) + poWelder;
-
-            // Merge PO Numbers
-            const existingPoList = proj.poNo ? proj.poNo.split(", ").map(p => p.trim()) : [];
-            if (poNo && !existingPoList.includes(poNo.trim())) {
-              existingPoList.push(poNo.trim());
-            }
-            const updatedPoNo = existingPoList.join(", ");
-
+      const existingProj = projectsTemp.find(p => p.id === targetProjectId);
+      if (existingProj) {
+        projectsTemp = projectsTemp.map(proj => {
+          if (proj.id === targetProjectId) {
             return {
               ...proj,
               name: projectName,
               code: projectCode,
-              pic: pic || proj.pic || proj.manager,
+              pic: pic,
               company: updatedCompany,
-              poNo: updatedPoNo,
-              customContractItems: mergedItems,
+              poNo: poNo,
+              customContractItems: contractItems,
               contractValue: {
-                piping: pipingVal,
-                electrical: electricalVal,
-                mechanical: mechanicalVal,
-                scafolder: scafolderVal,
-                welder: welderVal,
-              },
+                piping: Number(pipingItem?.value || 0),
+                electrical: Number(electricalItem?.value || 0),
+                mechanical: Number(mechanicalItem?.value || 0),
+                scafolder: Number(scafolderItem?.value || 0),
+                welder: Number(welderItem?.value || 0),
+              }
             };
           }
           return proj;
-        })
-      );
+        });
+      } else {
+        const newProject: Project = {
+          id: targetProjectId,
+          name: projectName,
+          code: projectCode,
+          manager: pic,
+          pic: pic,
+          status: ProjectStatus.PROGRES,
+          startDate: date,
+          expectedProfitPercent: 35,
+          contractValue: {
+            piping: Number(pipingItem?.value || 0),
+            electrical: Number(electricalItem?.value || 0),
+            mechanical: Number(mechanicalItem?.value || 0),
+            scafolder: Number(scafolderItem?.value || 0),
+            welder: Number(welderItem?.value || 0),
+          },
+          contractNames: {
+            piping: pipingItem?.name || "Piping",
+            electrical: electricalItem?.name || "Electrical",
+            mechanical: mechanicalItem?.name || "Mechanical",
+            scafolder: scafolderItem?.name || "Scafolder",
+            welder: welderItem?.name || "Welder",
+          },
+          ppnPercent: 11,
+          pphPercent: pphPercentInput,
+          budgetThresholdPercent: 85,
+          notes: description,
+          company: updatedCompany,
+          poNo: poNo,
+          customContractItems: contractItems,
+        };
+        projectsTemp = [newProject, ...projectsTemp];
+      }
+    } else {
+      projectsTemp = projectsTemp.map((proj) => {
+        if (proj.id === linkProjectId) {
+          let existingItems = proj.customContractItems ? [...proj.customContractItems] : [];
+          if (existingItems.length === 0) {
+            existingItems = [
+              { id: "piping", name: proj.contractNames?.piping || "Piping", value: proj.contractValue?.piping || 0 },
+              { id: "electrical", name: proj.contractNames?.electrical || "Electrical", value: proj.contractValue?.electrical || 0 },
+              { id: "mechanical", name: proj.contractNames?.mechanical || "Mechanical", value: proj.contractValue?.mechanical || 0 },
+              { id: "scafolder", name: proj.contractNames?.scafolder || "Scafolder", value: proj.contractValue?.scafolder || 0 },
+              { id: "welder", name: proj.contractNames?.welder || "Welder", value: proj.contractValue?.welder || 0 },
+            ];
+          }
+
+          const mergedItems = existingItems.map((item) => ({ ...item }));
+
+          contractItems.forEach((newItem) => {
+            const match = mergedItems.find(
+              (item) => item.name.toLowerCase().trim() === newItem.name.toLowerCase().trim()
+            );
+            if (match) {
+              match.value = Number(match.value || 0) + Number(newItem.value || 0);
+            } else {
+              const isIdTaken = mergedItems.some((item) => item.id === newItem.id);
+              const uniqueId = (isIdTaken || !newItem.id)
+                ? `item-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`
+                : newItem.id;
+              mergedItems.push({
+                id: uniqueId,
+                name: newItem.name,
+                value: Number(newItem.value || 0),
+              });
+            }
+          });
+
+          const poPiping = Number(contractItems.find(i => i.name.toLowerCase().includes("piping") || i.id === "piping" || i.id === "1")?.value || 0);
+          const poElectrical = Number(contractItems.find(i => i.name.toLowerCase().includes("elect") || i.id === "electrical" || i.id === "2")?.value || 0);
+          const poMechanical = Number(contractItems.find(i => i.name.toLowerCase().includes("mech") || i.id === "mechanical" || i.id === "3")?.value || 0);
+          const poScafolder = Number(contractItems.find(i => i.name.toLowerCase().includes("scaf") || i.id === "scafolder" || i.id === "4")?.value || 0);
+          const poWelder = Number(contractItems.find(i => i.name.toLowerCase().includes("weld") || i.id === "welder" || i.id === "5")?.value || 0);
+
+          const pipingVal = (proj.contractValue?.piping || 0) + poPiping;
+          const electricalVal = (proj.contractValue?.electrical || 0) + poElectrical;
+          const mechanicalVal = (proj.contractValue?.mechanical || 0) + poMechanical;
+          const scafolderVal = (proj.contractValue?.scafolder || 0) + poScafolder;
+          const welderVal = (proj.contractValue?.welder || 0) + poWelder;
+
+          const existingPoList = proj.poNo ? proj.poNo.split(", ").map(p => p.trim()) : [];
+          if (poNo && !existingPoList.includes(poNo.trim())) {
+            existingPoList.push(poNo.trim());
+          }
+          const updatedPoNo = existingPoList.join(", ");
+
+          return {
+            ...proj,
+            name: projectName,
+            code: projectCode,
+            pic: pic || proj.pic || proj.manager,
+            company: updatedCompany,
+            poNo: updatedPoNo,
+            customContractItems: mergedItems,
+            contractValue: {
+              piping: pipingVal,
+              electrical: electricalVal,
+              mechanical: mechanicalVal,
+              scafolder: scafolderVal,
+              welder: welderVal,
+            },
+          };
+        }
+        return proj;
+      });
     }
 
-    // 2. Create the PO transaction (Owner PO) with detailed items
-    const newPO: Transaction = {
-      id: `po-${Date.now()}`,
-      projectId: targetProjectId,
-      type: "PO",
-      pic: pic,
-      date: date,
-      poNo: poNo,
-      supplier: supplier, // Owner / Client
-      status: status, // e.g. "Waiting PO", "Sudah Proses"
-      description: `Owner PO - ${description}`,
-      category: "Material", // Default category required by Category type
-      amount: totalContractValue,
-      contractItems: contractItems, // Save the items here
-      company: updatedCompany,
-    };
+    setProjects(projectsTemp);
 
-    setTransactions((prev) => [newPO, ...prev]);
+    if (editingPoId) {
+      setTransactions((prev) => {
+        const filtered = prev.filter((t) => t.id !== `po-ho-cut-${editingPoId}`);
+        const mapped = filtered.map((t) => {
+          if (t.id === editingPoId) {
+            return {
+              ...t,
+              projectId: targetProjectId,
+              pic: pic,
+              date: date,
+              poNo: poNo,
+              supplier: supplier,
+              status: status,
+              description: `Owner PO - ${description} (Potongan 2% HO)`,
+              amount: finalPoAmount,
+              contractItems: contractItems,
+              company: updatedCompany,
+            };
+          }
+          return t;
+        });
+        if (hoTx) {
+          return [hoTx, ...mapped];
+        }
+        return mapped;
+      });
+    } else {
+      const newPO: Transaction = {
+        id: targetPoId,
+        projectId: targetProjectId,
+        type: "PO",
+        pic: pic,
+        date: date,
+        poNo: poNo,
+        supplier: supplier,
+        status: status,
+        description: `Owner PO - ${description} (Potongan 2% HO)`,
+        category: "Material",
+        amount: finalPoAmount,
+        contractItems: contractItems,
+        company: updatedCompany,
+      };
+      setTransactions((prev) => {
+        const base = [newPO, ...prev];
+        if (hoTx) {
+          return [hoTx, ...base];
+        }
+        return base;
+      });
+    }
 
     if (onAddActivity) {
       const displayAmt = new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(totalContractValue);
-      const proj = projects.find((p) => p.id === targetProjectId);
+      const displayCut = new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(cutAmount);
+      const proj = projectsTemp.find((p) => p.id === targetProjectId);
       onAddActivity(
         "po",
-        "Material PO Tersimpan",
-        `Menginput Purchase Order baru [${poNo}] senilai ${displayAmt} untuk proyek "${proj ? proj.name : (projectName || "Proyek Baru")}"`,
+        editingPoId ? "Material PO Diperbarui" : "Material PO Tersimpan",
+        editingPoId 
+          ? `Memperbarui Purchase Order [${poNo}] senilai ${displayAmt} (Potongan 2% HO: ${displayCut}) untuk proyek "${proj ? proj.name : (projectName || "Proyek")}"`
+          : `Menginput Purchase Order baru [${poNo}] senilai ${displayAmt} (Potongan 2% HO: ${displayCut}) untuk proyek "${proj ? proj.name : (projectName || "Proyek Baru")}"`,
         pic || "Administrator",
         targetProjectId
       );
+
+      if (targetHoProj) {
+        onAddActivity(
+          "po",
+          "Dana 2% Terbuku",
+          `Penerimaan Dana 2% otomatis dari PO [${poNo}] senilai ${displayCut} untuk Project ${targetHoProj.name}`,
+          "Sistem Otomatis",
+          targetHoProj.id
+        );
+      }
     }
 
     // Reset Form fields
@@ -354,8 +623,57 @@ export default function PurchaseOrderManager({
     setCompany("CV. Mandiri Cipta Jaya");
     setCustomCompany("");
     setPphPercentInput(4);
+    setEditingPoId(null);
     setShowAddForm(false);
-    setAlertMessage(`Purchase Order (PO) "${poNo}" berhasil dicatat.`);
+    setAlertMessage(editingPoId ? `Purchase Order (PO) "${poNo}" berhasil diperbarui.` : `Purchase Order (PO) "${poNo}" berhasil dicatat.`);
+  };
+
+  const handleEditPO = (po: Transaction) => {
+    setEditingPoId(po.id);
+    setLinkProjectId(po.projectId || "");
+    setPoNo(po.poNo || "");
+    setSupplier(po.supplier || "");
+    setPic(po.pic || "");
+    setDate(po.date || "");
+    
+    if (po.contractItems && po.contractItems.length > 0) {
+      setContractItems(po.contractItems.map(item => ({ ...item })));
+    } else {
+      setContractItems([
+        { id: "piping", name: "Piping", value: 0 },
+        { id: "electrical", name: "Electrical", value: 0 },
+        { id: "mechanical", name: "Mechanical", value: 0 },
+        { id: "scafolder", name: "Scafolder", value: 0 },
+        { id: "welder", name: "Welder", value: 0 },
+      ]);
+    }
+    
+    const proj = projects.find((p) => p.id === po.projectId);
+    if (proj) {
+      setProjectName(proj.name);
+      setProjectCode(proj.code || "");
+      if (proj.company === "CV. Mandiri Cipta Jaya" || proj.company === "PT. Elqia Jaya Teknik") {
+        setCompany(proj.company);
+        setCustomCompany("");
+      } else if (proj.company) {
+        setCompany("Lainnya");
+        setCustomCompany(proj.company);
+      } else {
+        setCompany("CV. Mandiri Cipta Jaya");
+        setCustomCompany("");
+      }
+      setPphPercentInput(proj.pphPercent !== undefined ? proj.pphPercent : 4);
+    } else {
+      setProjectName("");
+      setProjectCode("");
+      setCompany("CV. Mandiri Cipta Jaya");
+      setCustomCompany("");
+      setPphPercentInput(4);
+    }
+    
+    setDescription(po.description ? po.description.replace(/^Owner PO - /, "") : "");
+    setStatus(po.status || "Waiting PO");
+    setShowAddForm(true);
   };
 
   const triggerDeletePO = (id: string) => {
@@ -435,7 +753,7 @@ export default function PurchaseOrderManager({
       );
     }
 
-    setTransactions((prev) => prev.filter((t) => t.id !== id));
+    setTransactions((prev) => prev.filter((t) => t.id !== id && t.id !== `po-ho-cut-${id}`));
     setPoToDelete(null);
     setAlertMessage("Purchase Order (PO) berhasil dihapus.");
   };
@@ -479,7 +797,9 @@ export default function PurchaseOrderManager({
             onClick={() => {
               if (showAddForm) {
                 setShowAddForm(false);
+                setEditingPoId(null);
               } else {
+                setEditingPoId(null);
                 setLinkProjectId("new");
                 setProjectName("");
                 setProjectCode("");
@@ -501,7 +821,7 @@ export default function PurchaseOrderManager({
             }}
             className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl flex items-center justify-center gap-2 text-xs font-semibold shadow-md transition-all cursor-pointer"
           >
-            {showAddForm ? "Tutup Form" : <><Plus className="w-4 h-4" /> Registrasi PO Baru</>}
+            {showAddForm ? (editingPoId ? "Batal Edit" : "Tutup Form") : <><Plus className="w-4 h-4" /> Registrasi PO Baru</>}
           </button>
         )}
       </div>
@@ -515,7 +835,9 @@ export default function PurchaseOrderManager({
         >
           <div className="bg-blue-50/50 p-4 border-b border-blue-500/10 flex items-center gap-2">
             <ShoppingBag className="w-5 h-5 text-blue-600" />
-            <h3 className="font-bold text-sm text-gray-900 font-sans">Form Registrasi Purchase Order (PO)</h3>
+            <h3 className="font-bold text-sm text-gray-900 font-sans">
+              {editingPoId ? "Form Edit Purchase Order (PO)" : "Form Registrasi Purchase Order (PO)"}
+            </h3>
           </div>
 
           <form onSubmit={handleCreatePO} className="p-6 space-y-6">
@@ -810,7 +1132,28 @@ export default function PurchaseOrderManager({
             <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
               <button
                 type="button"
-                onClick={() => setShowAddForm(false)}
+                onClick={() => {
+                  setShowAddForm(false);
+                  setEditingPoId(null);
+                  setLinkProjectId("new");
+                  setProjectName("");
+                  setProjectCode("");
+                  setPoNo("");
+                  setSupplier("");
+                  setPic("");
+                  setContractItems([
+                    { id: "piping", name: "Piping", value: 0 },
+                    { id: "electrical", name: "Electrical", value: 0 },
+                    { id: "mechanical", name: "Mechanical", value: 0 },
+                    { id: "scafolder", name: "Scafolder", value: 0 },
+                    { id: "welder", name: "Welder", value: 0 },
+                  ]);
+                  setDescription("");
+                  setStatus("Waiting PO");
+                  setCompany("CV. Mandiri Cipta Jaya");
+                  setCustomCompany("");
+                  setPphPercentInput(4);
+                }}
                 className="border border-gray-200 text-gray-600 px-4 py-2 text-xs font-semibold rounded-xl hover:bg-gray-50 transition-all cursor-pointer"
               >
                 Batal
@@ -819,7 +1162,7 @@ export default function PurchaseOrderManager({
                 type="submit"
                 className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 text-xs font-bold rounded-xl shadow-md transition-all cursor-pointer"
               >
-                Simpan PO &amp; Daftarkan Proyek Otomatis
+                {editingPoId ? "Simpan Perubahan PO" : "Simpan PO & Daftarkan Proyek Otomatis"}
               </button>
             </div>
           </form>
@@ -978,7 +1321,14 @@ export default function PurchaseOrderManager({
 
                       {/* Actions */}
                       {!isReadOnly && (
-                        <td className="p-3.5 text-right">
+                        <td className="p-3.5 text-right flex justify-end gap-1.5">
+                          <button
+                            onClick={() => handleEditPO(po)}
+                            className="text-gray-400 hover:text-blue-600 p-1.5 rounded hover:bg-blue-50 transition-colors cursor-pointer"
+                            title="Edit PO"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </button>
                           <button
                             onClick={() => triggerDeletePO(po.id)}
                             className="text-gray-400 hover:text-red-600 p-1.5 rounded hover:bg-red-50 transition-colors cursor-pointer"

@@ -27,7 +27,14 @@ import {
   Edit3,
   Users,
   Award,
-  TrendingUp
+  TrendingUp,
+  FileText,
+  Upload,
+  Image as ImageIcon,
+  X,
+  Check,
+  AlertCircle,
+  FileSpreadsheet
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
@@ -317,6 +324,12 @@ export default function PetyCashRequestManager({
   const [showAddForm, setShowAddForm] = React.useState(false);
   const [viewMode, setViewMode] = React.useState<"list" | "summary">("list");
 
+  // PDF Preview & Transfer Proof States
+  const [pdfViewRequest, setPdfViewRequest] = React.useState<Transaction | null>(null);
+  const [transferProofTx, setTransferProofTx] = React.useState<Transaction | null>(null);
+  const [dragActive, setDragActive] = React.useState(false);
+  const [showExcelPreview, setShowExcelPreview] = React.useState(false);
+
   // Form Fields
   const [projectId, setProjectId] = React.useState(selectedProjectId && selectedProjectId !== "all" ? selectedProjectId : (projects[0]?.id || ""));
 
@@ -383,6 +396,60 @@ export default function PetyCashRequestManager({
       return () => clearTimeout(timer);
     }
   }, [alertMessage]);
+
+  // AUTO-SAVE & AUTO-LOAD DRAFT FOR PETY CASH REQUEST FORM
+  React.useEffect(() => {
+    const savedDraft = localStorage.getItem("pety_cash_request_draft");
+    if (savedDraft) {
+      try {
+        const draft = JSON.parse(savedDraft);
+        if (draft) {
+          if (draft.projectId) setProjectId(draft.projectId);
+          if (draft.pic) setPic(draft.pic);
+          if (draft.date) setDate(draft.date);
+          if (draft.requestNo) setRequestNo(draft.requestNo);
+          if (draft.status) setStatus(draft.status);
+          if (draft.paymentMethod) setPaymentMethod(draft.paymentMethod);
+          if (draft.company) setCompany(draft.company);
+          if (draft.customCompany) setCustomCompany(draft.customCompany);
+          if (draft.currentItems) setCurrentItems(draft.currentItems);
+          if (draft.showAddForm !== undefined) setShowAddForm(draft.showAddForm);
+        }
+      } catch (err) {
+        console.error("Error loading pety cash request draft", err);
+      }
+    }
+  }, []);
+
+  React.useEffect(() => {
+    if (!editingRequestId) {
+      const draft = {
+        projectId,
+        pic,
+        date,
+        requestNo,
+        status,
+        paymentMethod,
+        company,
+        customCompany,
+        currentItems,
+        showAddForm
+      };
+      localStorage.setItem("pety_cash_request_draft", JSON.stringify(draft));
+    }
+  }, [
+    projectId,
+    pic,
+    date,
+    requestNo,
+    status,
+    paymentMethod,
+    company,
+    customCompany,
+    currentItems,
+    showAddForm,
+    editingRequestId
+  ]);
 
   const formatIDR = (val: number) => {
     return new Intl.NumberFormat("id-ID", {
@@ -685,6 +752,33 @@ export default function PetyCashRequestManager({
 
     setRequestToRealize(null);
     setAlertMessage(`Berhasil merealisasikan pengajuan petty cash! Kode Pengeluaran: ${generatedNo}`);
+  };
+
+  const handleFileUpload = (file: File) => {
+    if (!transferProofTx) return;
+    if (!file.type.startsWith("image/")) {
+      alert("Hanya file gambar (PNG, JPG, JPEG) yang diperbolehkan sebagai bukti transfer.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const base64 = reader.result as string;
+      setTransactions((prev) =>
+        prev.map((t) => {
+          if (t.id === transferProofTx.id) {
+            return { ...t, transferProof: base64 };
+          }
+          // Also attach to the corresponding PetyCash expense transaction if realized
+          if (t.type === "PetyCash" && t.requestId === transferProofTx.id) {
+            return { ...t, transferProof: base64 };
+          }
+          return t;
+        })
+      );
+      setTransferProofTx((prev) => prev ? { ...prev, transferProof: base64 } : null);
+      setAlertMessage("Bukti transfer manual berhasil diunggah!");
+    };
+    reader.readAsDataURL(file);
   };
 
   // Budget alert warning
@@ -1271,14 +1365,23 @@ export default function PetyCashRequestManager({
         </div>
 
         {/* Filter Summary */}
-        <div className="flex justify-between items-center text-xs pt-3 border-t border-gray-100">
-          <span className="text-gray-500">
-            Menampilkan <strong className="text-gray-900">{filteredRequests.length}</strong> pengajuan dari total{" "}
-            <strong>{requestList.length}</strong>
-          </span>
-          <span className="text-slate-500 font-semibold">
-            Total Saringan Nominal: <strong className="text-blue-600 font-mono text-sm">{formatIDR(totalRequestedSum)}</strong>
-          </span>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs pt-3 border-t border-gray-100">
+          <div className="flex flex-col gap-0.5">
+            <span className="text-gray-500">
+              Menampilkan <strong className="text-gray-900">{filteredRequests.length}</strong> pengajuan dari total{" "}
+              <strong>{requestList.length}</strong>
+            </span>
+            <span className="text-slate-500 font-semibold">
+              Total Saringan Nominal: <strong className="text-blue-600 font-mono text-sm">{formatIDR(totalRequestedSum)}</strong>
+            </span>
+          </div>
+          <button
+            onClick={() => setShowExcelPreview(true)}
+            className="inline-flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3.5 py-2 rounded-xl text-xs transition-all cursor-pointer shadow-sm hover:shadow-md hover:shadow-emerald-500/10"
+          >
+            <FileSpreadsheet className="w-4 h-4 text-emerald-100" />
+            <span>Tampilan & Ekspor Excel</span>
+          </button>
         </div>
       </div>
 
@@ -1402,21 +1505,47 @@ export default function PetyCashRequestManager({
 
                         {/* Status */}
                         <td className="p-3.5 text-center">
-                          <span
-                            className={`text-[9px] font-bold px-2 py-0.5 rounded uppercase tracking-wider border ${
-                              req.status === "Sudah Realisasi"
-                                ? "bg-emerald-100 text-emerald-800 border-emerald-300 font-extrabold"
-                                : req.status === "Realisasi Sebagian"
-                                ? "bg-cyan-100 text-cyan-800 border-cyan-300 font-bold"
-                                : req.status === "Disetujui"
-                                ? "bg-blue-50 text-blue-800 border-blue-200"
-                                : req.status === "Ditolak"
-                                ? "bg-red-50 text-red-800 border-red-200"
-                                : "bg-amber-50 text-amber-800 border-amber-200"
-                            }`}
-                          >
-                            {req.status}
-                          </span>
+                          <div className="flex flex-col items-center gap-1.5">
+                            <span
+                              className={`text-[9px] font-bold px-2 py-0.5 rounded uppercase tracking-wider border ${
+                                req.status === "Sudah Realisasi"
+                                  ? "bg-emerald-100 text-emerald-800 border-emerald-300 font-extrabold"
+                                  : req.status === "Realisasi Sebagian"
+                                  ? "bg-cyan-100 text-cyan-800 border-cyan-300 font-bold"
+                                  : req.status === "Disetujui"
+                                  ? "bg-blue-50 text-blue-800 border-blue-200"
+                                  : req.status === "Ditolak"
+                                  ? "bg-red-50 text-red-800 border-red-200"
+                                  : "bg-amber-50 text-amber-800 border-amber-200"
+                              }`}
+                            >
+                              {req.status}
+                            </span>
+
+                            {(req.status === "Sudah Realisasi" || req.status === "Realisasi Sebagian" || req.status === "Disetujui") && (
+                              <button
+                                onClick={() => setTransferProofTx(req)}
+                                className={`inline-flex items-center justify-center gap-1 text-[9px] px-1.5 py-0.5 rounded font-extrabold border shadow-xs transition-all cursor-pointer ${
+                                  req.transferProof
+                                    ? "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100"
+                                    : "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100"
+                                }`}
+                                title="Lihat / Unggah Bukti Transfer"
+                              >
+                                {req.transferProof ? (
+                                  <>
+                                    <Check className="w-2.5 h-2.5 text-emerald-600 shrink-0" />
+                                    <span>Bukti OK</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Upload className="w-2.5 h-2.5 text-blue-600 shrink-0" />
+                                    <span>Bukti TF</span>
+                                  </>
+                                )}
+                              </button>
+                            )}
+                          </div>
                         </td>
 
                         {/* Actions */}
@@ -1460,6 +1589,14 @@ export default function PetyCashRequestManager({
                                 <Edit3 className="w-3 h-3" /> Ubah
                               </button>
                             )}
+
+                            <button
+                              onClick={() => setPdfViewRequest(req)}
+                              className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 hover:text-blue-800 px-2 py-1 rounded text-[10px] font-bold transition-colors cursor-pointer"
+                              title="Lihat PDF Form & Cetak"
+                            >
+                              <FileText className="w-3.5 h-3.5" /> PDF
+                            </button>
 
                             <button
                               onClick={() => printVoucher(req, proj)}
@@ -1807,6 +1944,727 @@ export default function PetyCashRequestManager({
                 className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl text-xs transition-all cursor-pointer shadow-md flex items-center gap-1.5 hover:shadow-lg hover:shadow-emerald-500/15"
               >
                 <CheckCircle2 className="w-3.5 h-3.5" /> Ya, Realisasikan
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* EXCEL SHEET PREVIEW & EXPORT MODAL */}
+      {showExcelPreview && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-slate-100 rounded-2xl max-w-5xl w-full shadow-2xl overflow-hidden border border-slate-200 animate-in fade-in zoom-in-95 duration-200 flex flex-col my-8">
+            {/* Modal Header (Excel-Style Green theme) */}
+            <div className="bg-emerald-800 text-white px-6 py-4 flex items-center justify-between border-b border-emerald-900">
+              <div className="flex items-center gap-2.5">
+                <FileSpreadsheet className="w-5.5 h-5.5 text-emerald-200" />
+                <div>
+                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                    Lembar Kerja Excel - Pengajuan Petty Cash
+                    <span className="bg-emerald-700 text-emerald-100 text-[9px] font-extrabold px-2 py-0.5 rounded-full border border-emerald-500 uppercase tracking-wider">
+                      Online Spreadsheet
+                    </span>
+                  </h3>
+                  <p className="text-[10px] text-emerald-200/90 font-medium">Berdasarkan filter aktif ({filteredRequests.length} baris terekam)</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowExcelPreview(false)}
+                className="text-emerald-200 hover:text-white p-1 rounded-full hover:bg-emerald-700/50 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Excel ribbon toolbar */}
+            <div className="bg-white border-b border-gray-200 px-4 py-2 flex items-center gap-4 text-[11px] text-slate-600 font-medium overflow-x-auto">
+              <div className="flex items-center gap-1 bg-emerald-50 text-emerald-800 px-2.5 py-1 rounded border border-emerald-200 font-bold">
+                <Check className="w-3.5 h-3.5" /> File Terhubung
+              </div>
+              <div className="h-4 w-px bg-gray-200"></div>
+              <button
+                onClick={() => {
+                  let html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">`;
+                  html += `<head><meta charset="utf-8" /><style>`;
+                  html += `table { border-collapse: collapse; width: 100%; font-family: sans-serif; }`;
+                  html += `th { background-color: #047857; color: white; font-weight: bold; padding: 10px; border: 1px solid #10b981; text-align: left; font-size: 11px; }`;
+                  html += `td { padding: 8px; border: 1px solid #e2e8f0; text-align: left; font-size: 11px; }`;
+                  html += `.text-right { text-align: right; }`;
+                  html += `.text-center { text-align: center; }`;
+                  html += `.font-mono { font-family: monospace; }`;
+                  html += `.font-bold { font-weight: bold; }`;
+                  html += `.title { font-size: 16px; font-weight: bold; color: #064e3b; text-align: center; padding: 10px 0; }`;
+                  html += `</style></head><body>`;
+                  
+                  html += `<table>`;
+                  html += `<tr><td colspan="9" class="title">REKAPITULASI PENGAJUAN PETTY CASH LAPANGAN</td></tr>`;
+                  html += `<tr><td colspan="9" class="text-center" style="font-size: 10px; color: #64748b;">Tanggal Unduh: ${new Date().toLocaleDateString("id-ID")} ${new Date().toLocaleTimeString("id-ID")}</td></tr>`;
+                  html += `<tr><td colspan="9"></td></tr>`;
+                  
+                  // Headers
+                  html += `<tr>`;
+                  html += `<th>No</th>`;
+                  html += `<th>Tanggal</th>`;
+                  html += `<th>No Pengajuan</th>`;
+                  html += `<th>PIC Pemohon</th>`;
+                  html += `<th>Proyek Terkait</th>`;
+                  html += `<th>Deskripsi & Keperluan Belanja</th>`;
+                  html += `<th>Metode Pembayaran</th>`;
+                  html += `<th>Status Persetujuan</th>`;
+                  html += `<th class="text-right">Nominal Pengajuan (Rp)</th>`;
+                  html += `</tr>`;
+                  
+                  filteredRequests.forEach((req, idx) => {
+                    const proj = projects.find((p) => p.id === req.projectId);
+                    const projStr = proj ? `[${proj.code}] ${proj.name}` : "N/A";
+                    
+                    let itemDetails = req.description;
+                    if (req.items && req.items.length > 0) {
+                      itemDetails += " - Rincian: " + req.items.map((it) => `${it.description} (${formatIDR(it.amount)})`).join(", ");
+                    }
+
+                    html += `<tr>`;
+                    html += `<td class="text-center">${idx + 1}</td>`;
+                    html += `<td>${req.date}</td>`;
+                    html += `<td class="font-mono">${req.petyCashNo || "-"}</td>`;
+                    html += `<td>${req.pic}</td>`;
+                    html += `<td>${projStr}</td>`;
+                    html += `<td>${itemDetails}</td>`;
+                    html += `<td class="text-center">${req.paymentMethod || "Tunai"}</td>`;
+                    html += `<td class="text-center font-bold">${req.status}</td>`;
+                    html += `<td class="text-right font-mono font-bold">${req.amount}</td>`;
+                    html += `</tr>`;
+                  });
+                  
+                  html += `<tr>`;
+                  html += `<td colspan="8" class="text-right font-bold" style="background-color: #f0fdf4;">GRAND TOTAL:</td>`;
+                  html += `<td class="text-right font-mono font-bold" style="background-color: #f0fdf4; color: #15803d;">${totalRequestedSum}</td>`;
+                  html += `</tr>`;
+                  
+                  html += `</table></body></html>`;
+
+                  const blob = new Blob([html], { type: "application/vnd.ms-excel;charset=utf-8" });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.download = `Rekap_Pengajuan_Petty_Cash_${new Date().toISOString().split("T")[0]}.xls`;
+                  document.body.appendChild(a);
+                  a.click();
+                  document.body.removeChild(a);
+                  URL.revokeObjectURL(url);
+                }}
+                className="hover:text-emerald-700 hover:bg-slate-100 px-2 py-1 rounded transition-colors flex items-center gap-1 text-slate-700"
+              >
+                📥 Unduh XLS Ke Excel
+              </button>
+              <div className="h-4 w-px bg-gray-200"></div>
+              <span className="text-gray-400 select-none">Gridlines: On | Formulas: Auto | Sheet1</span>
+            </div>
+
+            {/* Excel Formula & Reference Bar */}
+            <div className="bg-slate-50 border-b border-gray-200 px-4 py-1.5 flex items-center gap-2 text-xs font-mono text-slate-500">
+              <span className="bg-white border border-gray-300 px-2 py-0.5 text-slate-700 font-bold rounded">A1:I{filteredRequests.length + 4}</span>
+              <span className="text-gray-400 font-bold italic select-none">fx</span>
+              <div className="bg-white border border-gray-300 rounded px-2 py-0.5 text-slate-700 flex-1 font-sans font-medium text-[11px] truncate">
+                =REKAP_PETTY_CASH(CV. MANDIRI CIPTA JAYA, RowCount: {filteredRequests.length}, Sum: {formatIDR(totalRequestedSum)})
+              </div>
+            </div>
+
+            {/* Excel Worksheet Sheet Body */}
+            <div className="p-4 bg-slate-200 overflow-auto max-h-[60vh]">
+              <div className="bg-white border border-slate-300 shadow-md min-w-[900px] text-[11px]">
+                <table className="w-full border-collapse">
+                  <thead>
+                    {/* Column Headers (A, B, C...) */}
+                    <tr className="bg-slate-100 text-slate-400 text-center font-mono select-none text-[10px] border-b border-slate-300">
+                      <th className="w-10 bg-slate-200 border-r border-slate-300 p-1 font-bold text-slate-500">#</th>
+                      <th className="border-r border-slate-300 p-1">A</th>
+                      <th className="border-r border-slate-300 p-1">B</th>
+                      <th className="border-r border-slate-300 p-1">C</th>
+                      <th className="border-r border-slate-300 p-1">D</th>
+                      <th className="border-r border-slate-300 p-1">E</th>
+                      <th className="border-r border-slate-300 p-1">F</th>
+                      <th className="border-r border-slate-300 p-1">G</th>
+                      <th className="border-r border-slate-300 p-1">H</th>
+                      <th className="p-1">I</th>
+                    </tr>
+                    {/* Header title inside spreadsheet */}
+                    <tr className="border-b border-slate-200">
+                      <td className="bg-slate-100 text-center text-slate-400 font-mono border-r border-slate-300 p-1 select-none">1</td>
+                      <td colSpan={9} className="p-3 text-center font-bold text-sm text-emerald-800 bg-emerald-50/50">
+                        CV. MANDIRI CIPTA JAYA - REKAPITULASI PENGAJUAN PETTY CASH LAPANGAN
+                      </td>
+                    </tr>
+                    <tr className="border-b border-slate-300">
+                      <td className="bg-slate-100 text-center text-slate-400 font-mono border-r border-slate-300 p-1 select-none">2</td>
+                      <td colSpan={9} className="p-1 text-center text-[9px] text-gray-500 bg-slate-50">
+                        Tanggal Cetak Otomatis: {new Date().toLocaleDateString("id-ID")} pukul {new Date().toLocaleTimeString("id-ID")} WIB
+                      </td>
+                    </tr>
+                    {/* Table Column Labels */}
+                    <tr className="bg-emerald-700 text-white font-bold text-left border-b border-slate-300">
+                      <td className="bg-slate-200 text-center text-slate-500 font-mono border-r border-slate-300 p-1.5 select-none">3</td>
+                      <td className="border-r border-emerald-600 p-2 text-center w-10">No</td>
+                      <td className="border-r border-emerald-600 p-2">Tanggal</td>
+                      <td className="border-r border-emerald-600 p-2">No Pengajuan</td>
+                      <td className="border-r border-emerald-600 p-2">PIC Pemohon</td>
+                      <td className="border-r border-emerald-600 p-2">Proyek Terkait</td>
+                      <td className="border-r border-emerald-600 p-2">Deskripsi &amp; Item Keperluan</td>
+                      <td className="border-r border-emerald-600 p-2 text-center w-24">Metode</td>
+                      <td className="border-r border-emerald-600 p-2 text-center w-28">Status</td>
+                      <td className="p-2 text-right w-36">Nominal (IDR)</td>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200 font-mono">
+                    {filteredRequests.map((req, idx) => {
+                      const proj = projects.find((p) => p.id === req.projectId);
+                      const rowNum = idx + 4;
+
+                      let itemDetails = req.description;
+                      if (req.items && req.items.length > 0) {
+                        itemDetails += " - Rincian: " + req.items.map((it) => `${it.description} (${formatIDR(it.amount)})`).join(", ");
+                      }
+
+                      return (
+                        <tr key={req.id} className="hover:bg-slate-50 text-slate-800 text-[10.5px]">
+                          {/* Row Number Column */}
+                          <td className="bg-slate-100 text-center text-slate-400 font-mono border-r border-slate-300 p-1.5 select-none">{rowNum}</td>
+                          <td className="border-r border-slate-200 p-1.5 text-center text-gray-500 font-sans">{idx + 1}</td>
+                          <td className="border-r border-slate-200 p-1.5 font-sans whitespace-nowrap">{req.date}</td>
+                          <td className="border-r border-slate-200 p-1.5 font-bold text-slate-700 whitespace-nowrap">{req.petyCashNo || "-"}</td>
+                          <td className="border-r border-slate-200 p-1.5 font-sans whitespace-nowrap">{req.pic}</td>
+                          <td className="border-r border-slate-200 p-1.5 font-sans text-xs truncate max-w-[150px]" title={proj ? proj.name : "N/A"}>
+                            {proj ? `[${proj.code}] ${proj.name}` : "-"}
+                          </td>
+                          <td className="border-r border-slate-200 p-1.5 font-sans text-slate-600 max-w-sm truncate" title={itemDetails}>
+                            {itemDetails}
+                          </td>
+                          <td className="border-r border-slate-200 p-1.5 text-center font-sans uppercase text-[10px]">{req.paymentMethod || "Tunai"}</td>
+                          <td className="border-r border-slate-200 p-1.5 text-center">
+                            <span className={`px-1.5 py-0.25 rounded font-sans text-[9px] font-bold ${
+                              req.status === "Sudah Realisasi"
+                                ? "bg-emerald-100 text-emerald-800"
+                                : req.status === "Disetujui"
+                                ? "bg-blue-100 text-blue-800"
+                                : req.status === "Ditolak"
+                                ? "bg-red-100 text-red-800"
+                                : "bg-amber-100 text-amber-800"
+                            }`}>
+                              {req.status}
+                            </span>
+                          </td>
+                          <td className="p-1.5 text-right font-bold text-slate-900">{formatIDR(req.amount)}</td>
+                        </tr>
+                      );
+                    })}
+
+                    {/* Grand Total Row */}
+                    <tr className="bg-slate-50 font-bold border-t-2 border-slate-300">
+                      <td className="bg-slate-100 text-center text-slate-400 font-mono border-r border-slate-300 p-1.5 select-none">
+                        {filteredRequests.length + 4}
+                      </td>
+                      <td colSpan={8} className="p-2 text-right font-sans text-slate-600 border-r border-slate-200 text-xs font-black">
+                        TOTAL REKAPITULASI (NET SUM):
+                      </td>
+                      <td className="p-2 text-right text-emerald-700 text-xs font-black">
+                        {formatIDR(totalRequestedSum)}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="bg-slate-50 p-4 flex gap-3 justify-end border-t border-slate-200">
+              <button
+                type="button"
+                onClick={() => setShowExcelPreview(false)}
+                className="px-4 py-2.5 bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 font-semibold rounded-xl text-xs transition-all cursor-pointer shadow-sm"
+              >
+                Tutup
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  let html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">`;
+                  html += `<head><meta charset="utf-8" /><style>`;
+                  html += `table { border-collapse: collapse; width: 100%; font-family: sans-serif; }`;
+                  html += `th { background-color: #047857; color: white; font-weight: bold; padding: 10px; border: 1px solid #10b981; text-align: left; font-size: 11px; }`;
+                  html += `td { padding: 8px; border: 1px solid #e2e8f0; text-align: left; font-size: 11px; }`;
+                  html += `.text-right { text-align: right; }`;
+                  html += `.text-center { text-align: center; }`;
+                  html += `.font-mono { font-family: monospace; }`;
+                  html += `.font-bold { font-weight: bold; }`;
+                  html += `.title { font-size: 16px; font-weight: bold; color: #064e3b; text-align: center; padding: 10px 0; }`;
+                  html += `</style></head><body>`;
+                  
+                  html += `<table>`;
+                  html += `<tr><td colspan="9" class="title">REKAPITULASI PENGAJUAN PETTY CASH LAPANGAN</td></tr>`;
+                  html += `<tr><td colspan="9" class="text-center" style="font-size: 10px; color: #64748b;">Tanggal Unduh: ${new Date().toLocaleDateString("id-ID")} ${new Date().toLocaleTimeString("id-ID")}</td></tr>`;
+                  html += `<tr><td colspan="9"></td></tr>`;
+                  
+                  // Headers
+                  html += `<tr>`;
+                  html += `<th>No</th>`;
+                  html += `<th>Tanggal</th>`;
+                  html += `<th>No Pengajuan</th>`;
+                  html += `<th>PIC Pemohon</th>`;
+                  html += `<th>Proyek Terkait</th>`;
+                  html += `<th>Deskripsi & Keperluan Belanja</th>`;
+                  html += `<th>Metode Pembayaran</th>`;
+                  html += `<th>Status Persetujuan</th>`;
+                  html += `<th class="text-right">Nominal Pengajuan (Rp)</th>`;
+                  html += `</tr>`;
+                  
+                  filteredRequests.forEach((req, idx) => {
+                    const proj = projects.find((p) => p.id === req.projectId);
+                    const projStr = proj ? `[${proj.code}] ${proj.name}` : "N/A";
+                    
+                    let itemDetails = req.description;
+                    if (req.items && req.items.length > 0) {
+                      itemDetails += " - Rincian: " + req.items.map((it) => `${it.description} (${formatIDR(it.amount)})`).join(", ");
+                    }
+
+                    html += `<tr>`;
+                    html += `<td class="text-center">${idx + 1}</td>`;
+                    html += `<td>${req.date}</td>`;
+                    html += `<td class="font-mono">${req.petyCashNo || "-"}</td>`;
+                    html += `<td>${req.pic}</td>`;
+                    html += `<td>${projStr}</td>`;
+                    html += `<td>${itemDetails}</td>`;
+                    html += `<td class="text-center">${req.paymentMethod || "Tunai"}</td>`;
+                    html += `<td class="text-center font-bold">${req.status}</td>`;
+                    html += `<td class="text-right font-mono font-bold">${req.amount}</td>`;
+                    html += `</tr>`;
+                  });
+                  
+                  html += `<tr>`;
+                  html += `<td colspan="8" class="text-right font-bold" style="background-color: #f0fdf4;">GRAND TOTAL:</td>`;
+                  html += `<td class="text-right font-mono font-bold" style="background-color: #f0fdf4; color: #15803d;">${totalRequestedSum}</td>`;
+                  html += `</tr>`;
+                  
+                  html += `</table></body></html>`;
+
+                  const blob = new Blob([html], { type: "application/vnd.ms-excel;charset=utf-8" });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.download = `Rekap_Pengajuan_Petty_Cash_${new Date().toISOString().split("T")[0]}.xls`;
+                  document.body.appendChild(a);
+                  a.click();
+                  document.body.removeChild(a);
+                  URL.revokeObjectURL(url);
+                }}
+                className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs transition-all cursor-pointer shadow-md flex items-center gap-2 hover:shadow-lg hover:shadow-emerald-500/15"
+              >
+                <FileSpreadsheet className="w-4 h-4" /> Unduh Dokumen Excel Resmi (.xls)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PDF PREVIEW MODAL */}
+      {pdfViewRequest && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-slate-100 rounded-2xl max-w-2xl w-full shadow-2xl overflow-hidden border border-slate-200 animate-in fade-in zoom-in-95 duration-200 flex flex-col my-8">
+            {/* Modal Header */}
+            <div className="bg-slate-900 text-white px-6 py-4 flex items-center justify-between border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <FileText className="w-5 h-5 text-blue-400" />
+                <div>
+                  <h3 className="text-sm font-bold">Pratinjau Dokumen PDF</h3>
+                  <p className="text-[10px] text-slate-400">Tampilan formulir resmi siap cetak</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setPdfViewRequest(null)}
+                className="text-slate-400 hover:text-white p-1 rounded-full hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Document Sheet Container */}
+            <div className="p-6 overflow-y-auto max-h-[70vh] bg-slate-200 flex justify-center">
+              <div id="pdf-document-sheet" className="bg-white shadow-xl w-full p-8 border border-gray-300 text-slate-800 text-[11px] text-left font-sans select-none relative rounded-sm max-w-lg">
+                
+                {/* WATERMARK STAMP */}
+                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 -rotate-12 border-4 border-dashed border-blue-500/15 rounded-xl px-6 py-3 font-mono font-extrabold text-3xl text-blue-500/15 tracking-widest pointer-events-none select-none uppercase">
+                  {pdfViewRequest.status}
+                </div>
+
+                {/* Company & Document Header */}
+                <div className="flex justify-between items-start border-b-2 border-slate-900 pb-4 mb-4">
+                  <div>
+                    <h1 className="text-sm font-bold text-slate-900 tracking-tight uppercase">
+                      {pdfViewRequest.company || "CV. Mandiri Cipta Jaya"}
+                    </h1>
+                    <p className="text-[9px] text-gray-500 leading-tight">
+                      Kontraktor & Penyuplai Mekanikal Elektrikal Sipil
+                    </p>
+                    <p className="text-[8px] text-gray-400 mt-0.5">
+                      Ruko Taman Yasmin Sektor VI, Jl. KH. R. Abdullah Bin Nuh No. 24, Bogor
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <h2 className="text-xs font-bold text-blue-900 tracking-wider uppercase">
+                      FORM PENGAJUAN PETTY CASH
+                    </h2>
+                    <p className="text-[9px] text-gray-500">Permohonan Kas-Bon Lapangan</p>
+                    <div className="mt-1 inline-block bg-slate-100 px-2 py-0.5 rounded font-mono text-[9px] font-bold text-slate-700">
+                      Ref: {pdfViewRequest.petyCashNo || "-"}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Metadata Fields Grid */}
+                <div className="grid grid-cols-2 gap-x-6 gap-y-2 mb-5 bg-slate-50 border border-slate-200 rounded-lg p-3">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-1">
+                    <span className="text-gray-500 font-semibold">No. Dokumen:</span>
+                    <span className="font-bold text-slate-900 font-mono">{pdfViewRequest.petyCashNo || "-"}</span>
+                  </div>
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-1">
+                    <span className="text-gray-500 font-semibold">Tanggal:</span>
+                    <span className="font-bold text-slate-900">{pdfViewRequest.date}</span>
+                  </div>
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-1">
+                    <span className="text-gray-500 font-semibold">PIC Pemohon:</span>
+                    <span className="font-bold text-slate-900">{pdfViewRequest.pic}</span>
+                  </div>
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-1">
+                    <span className="text-gray-500 font-semibold">Metode Bayar:</span>
+                    <span className="font-bold text-slate-900 uppercase">{pdfViewRequest.paymentMethod || "Tunai"}</span>
+                  </div>
+                  <div className="col-span-2 flex items-start justify-between">
+                    <span className="text-gray-500 font-semibold shrink-0 mr-4">Proyek Terkait:</span>
+                    <span className="font-bold text-slate-900 text-right truncate">
+                      {(() => {
+                        const prj = projects.find((p) => p.id === pdfViewRequest.projectId);
+                        return prj ? `[${prj.code}] ${prj.name}` : "Proyek Dihapus";
+                      })()}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Description Heading */}
+                <div className="mb-2">
+                  <span className="text-[10px] uppercase font-bold text-slate-700 border-b border-slate-300 pb-0.5 block">
+                    Keterangan Pokok / Deskripsi Umum
+                  </span>
+                  <p className="text-[10px] text-slate-900 italic mt-1 bg-yellow-50/50 p-2 border border-yellow-100 rounded leading-relaxed">
+                    "{pdfViewRequest.description}"
+                  </p>
+                </div>
+
+                {/* Items List Table */}
+                <div className="mb-6 border border-slate-200 rounded overflow-hidden">
+                  <table className="w-full text-left text-[10px] border-collapse">
+                    <thead>
+                      <tr className="bg-slate-900 text-white font-bold text-[9px] uppercase">
+                        <th className="p-2 w-8 text-center border-r border-slate-800">No</th>
+                        <th className="p-2 border-r border-slate-800">Rincian Barang / Jasa Keperluan Lapangan</th>
+                        <th className="p-2 w-28 text-center border-r border-slate-800">Kategori Anggaran</th>
+                        <th className="p-2 w-28 text-right">Nominal Anggaran</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {pdfViewRequest.items && pdfViewRequest.items.length > 0 ? (
+                        pdfViewRequest.items.map((item, idx) => (
+                          <tr key={item.id} className="hover:bg-slate-50">
+                            <td className="p-2 text-center text-gray-400 font-mono border-r border-slate-100">{idx + 1}</td>
+                            <td className="p-2 font-medium text-slate-800 border-r border-slate-100">{item.description}</td>
+                            <td className="p-2 text-center border-r border-slate-100">
+                              <span className="text-[8px] font-bold px-1.5 py-0.25 rounded bg-blue-50 text-blue-700 border border-blue-100 uppercase">
+                                {item.category}
+                              </span>
+                            </td>
+                            <td className="p-2 text-right font-mono font-bold text-slate-900">{formatIDR(item.amount)}</td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr className="hover:bg-slate-50">
+                          <td className="p-2 text-center text-gray-400 font-mono border-r border-slate-100">1</td>
+                          <td className="p-2 font-medium text-slate-800 border-r border-slate-100">{pdfViewRequest.description}</td>
+                          <td className="p-2 text-center border-r border-slate-100">
+                            <span className="text-[8px] font-bold px-1.5 py-0.25 rounded bg-blue-50 text-blue-700 border border-blue-100 uppercase">
+                              {pdfViewRequest.category}
+                            </span>
+                          </td>
+                          <td className="p-2 text-right font-mono font-bold text-slate-900">{formatIDR(pdfViewRequest.amount)}</td>
+                        </tr>
+                      )}
+                      <tr className="bg-slate-100 font-extrabold border-t border-slate-300">
+                        <td colSpan={3} className="p-2 text-right text-slate-700 text-[9px] uppercase tracking-wider">
+                          TOTAL PENGAJUAN (NETTO):
+                        </td>
+                        <td className="p-2 text-right font-mono text-blue-700 text-xs border-l border-slate-200">
+                          {formatIDR(pdfViewRequest.amount)}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Signature Grid section */}
+                <div className="grid grid-cols-4 gap-2 text-[9px] border border-slate-200 rounded p-2 bg-slate-50">
+                  <div className="text-center flex flex-col justify-between h-20">
+                    <span className="text-gray-500 uppercase font-bold text-[8px] block border-b border-slate-100 pb-1">Diajukan Oleh</span>
+                    <span className="font-extrabold text-slate-800 truncate px-1">{pdfViewRequest.pic}</span>
+                    <span className="text-gray-400 text-[8px] uppercase tracking-tight block border-t border-slate-100 pt-1">PIC Lapangan</span>
+                  </div>
+                  <div className="text-center flex flex-col justify-between h-20 border-l border-slate-200">
+                    <span className="text-gray-500 uppercase font-bold text-[8px] block border-b border-slate-100 pb-1">Diperiksa Oleh</span>
+                    <span className="text-gray-300 italic text-[10px] font-medium">[Paraf]</span>
+                    <span className="text-gray-400 text-[8px] uppercase tracking-tight block border-t border-slate-100 pt-1">Site Supervisor</span>
+                  </div>
+                  <div className="text-center flex flex-col justify-between h-20 border-l border-slate-200">
+                    <span className="text-gray-500 uppercase font-bold text-[8px] block border-b border-slate-100 pb-1">Disetujui Oleh</span>
+                    {pdfViewRequest.status === "Disetujui" || pdfViewRequest.status === "Sudah Realisasi" ? (
+                      <span className="text-blue-600 font-mono font-bold text-[9px] border border-blue-200 rounded px-1 py-0.5 mx-1 bg-blue-50/50 self-center leading-tight">
+                        APPROVED<br />{pdfViewRequest.date}
+                      </span>
+                    ) : (
+                      <span className="text-gray-300 italic text-[10px] font-medium">[Belum Disetujui]</span>
+                    )}
+                    <span className="text-gray-400 text-[8px] uppercase tracking-tight block border-t border-slate-100 pt-1">Project Manager</span>
+                  </div>
+                  <div className="text-center flex flex-col justify-between h-20 border-l border-slate-200">
+                    <span className="text-gray-500 uppercase font-bold text-[8px] block border-b border-slate-100 pb-1">Dibayarkan Oleh</span>
+                    {pdfViewRequest.status === "Sudah Realisasi" ? (
+                      <span className="text-emerald-600 font-mono font-bold text-[9px] border border-emerald-200 rounded px-1 py-0.5 mx-1 bg-emerald-50/50 self-center leading-tight">
+                        PAID & TRF<br />{pdfViewRequest.date}
+                      </span>
+                    ) : (
+                      <span className="text-gray-300 italic text-[10px] font-medium">[Belum Realisasi]</span>
+                    )}
+                    <span className="text-gray-400 text-[8px] uppercase tracking-tight block border-t border-slate-100 pt-1">Finance & Kasir</span>
+                  </div>
+                </div>
+
+                {/* Footer disclaimer */}
+                <div className="mt-4 pt-2 border-t border-slate-200 flex justify-between text-[7px] text-gray-400">
+                  <span>Dokumen ini diterbitkan secara sah dan terekam dalam Sistem Keuangan Terpadu.</span>
+                  <span className="font-mono">ID: {pdfViewRequest.id}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer Controls */}
+            <div className="bg-slate-50 p-4 flex gap-3 justify-end border-t border-slate-200">
+              <button
+                type="button"
+                onClick={() => setPdfViewRequest(null)}
+                className="px-4 py-2.5 bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 font-semibold rounded-xl text-xs transition-all cursor-pointer shadow-sm"
+              >
+                Tutup
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const prj = projects.find((p) => p.id === pdfViewRequest.projectId);
+                  printVoucher(pdfViewRequest, prj);
+                }}
+                className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs transition-all cursor-pointer shadow-md flex items-center gap-2 hover:shadow-lg hover:shadow-blue-500/15"
+              >
+                <Printer className="w-4 h-4" /> Cetak Dokumen PDF
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* BUKTI TRANSFER MODAL */}
+      {transferProofTx && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl overflow-hidden border border-gray-100 animate-in fade-in zoom-in-95 duration-200 flex flex-col my-8">
+            {/* Modal Header */}
+            <div className="bg-slate-900 text-white px-6 py-4 flex items-center justify-between border-b border-slate-800">
+              <div className="flex items-center gap-2.5">
+                <ShieldCheck className="w-5 h-5 text-emerald-400" />
+                <div>
+                  <h3 className="text-sm font-bold">Bukti Transfer Kas Petty Cash</h3>
+                  <p className="text-[10px] text-slate-400">Verifikasi pengiriman dana untuk pengajuan {transferProofTx.petyCashNo}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setTransferProofTx(null)}
+                className="text-slate-400 hover:text-white p-1 rounded-full hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 space-y-6 overflow-y-auto max-h-[75vh] bg-slate-50">
+              
+              {/* CURRENT PROOF PREVIEW & RECEIPT */}
+              <div className="space-y-4">
+                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block">
+                  Tampilan Bukti Transfer Dana
+                </label>
+
+                {transferProofTx.transferProof ? (
+                  /* Custom uploaded transfer proof image */
+                  <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex flex-col items-center gap-3">
+                    <div className="relative border border-slate-100 rounded-lg overflow-hidden max-h-72 flex items-center justify-center bg-slate-100 w-full">
+                      <img
+                        src={transferProofTx.transferProof}
+                        alt="Bukti Transfer Lapangan"
+                        className="object-contain max-h-72 w-auto shadow-inner"
+                      />
+                    </div>
+                    <div className="flex justify-between items-center w-full">
+                      <span className="text-[10px] text-gray-400">Bukti manual terunggah</span>
+                      <button
+                        onClick={() => {
+                          setTransactions((prev) =>
+                            prev.map((t) => t.id === transferProofTx.id ? { ...t, transferProof: undefined } : t)
+                          );
+                          setTransferProofTx((prev) => prev ? { ...prev, transferProof: undefined } : null);
+                          setAlertMessage("Bukti transfer manual dihapus. Kembali ke resi elektronik.");
+                        }}
+                        className="text-[10px] font-bold text-red-600 hover:text-red-700 border border-red-100 hover:bg-red-50 px-2 py-0.5 rounded transition-all"
+                      >
+                        Hapus Bukti & Gunakan E-Receipt
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  /* High Fidelity Electronic Bank Receipt */
+                  <div className="bg-gradient-to-br from-emerald-600 to-teal-700 text-white rounded-xl shadow-lg border border-emerald-500 overflow-hidden relative">
+                    {/* Bank Watermark Stamp */}
+                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 -rotate-12 border-4 border-dashed border-white/10 rounded-full w-40 h-40 flex flex-col items-center justify-center font-mono font-extrabold text-white/10 tracking-widest pointer-events-none select-none">
+                      <span className="text-xs">MANDIRI</span>
+                      <span className="text-xl">LUNAS</span>
+                      <span className="text-[9px]">APPROVED</span>
+                    </div>
+
+                    <div className="p-5 text-center border-b border-white/10 relative z-10">
+                      <div className="mx-auto w-10 h-10 bg-white/20 rounded-full flex items-center justify-center mb-2 shadow-inner">
+                        <Check className="w-5 h-5 text-white" />
+                      </div>
+                      <span className="text-[9px] font-bold uppercase tracking-wider bg-white/25 text-white px-2.5 py-0.5 rounded-full">
+                        TRANSAKSI BERHASIL (SUCCESS)
+                      </span>
+                      <h4 className="text-xl font-black font-mono mt-2 tracking-wide text-white">
+                        {formatIDR(transferProofTx.amount)}
+                      </h4>
+                      <p className="text-[9px] text-teal-100 mt-1">E-Receipt Transfer Kas Negara & Petty Cash</p>
+                    </div>
+
+                    <div className="p-5 bg-white text-slate-800 text-[10.5px] space-y-2.5 font-sans relative z-10">
+                      <div className="flex justify-between border-b border-gray-100 pb-1.5">
+                        <span className="text-gray-400 font-semibold">Jenis Pengiriman:</span>
+                        <span className="font-bold text-slate-700">BI-FAST / Realtime Online</span>
+                      </div>
+                      <div className="flex justify-between border-b border-gray-100 pb-1.5">
+                        <span className="text-gray-400 font-semibold">Pengirim (Debitur):</span>
+                        <span className="font-bold text-slate-700 text-right">
+                          {transferProofTx.company || "CV. MANDIRI CIPTA JAYA"}
+                        </span>
+                      </div>
+                      <div className="flex justify-between border-b border-gray-100 pb-1.5">
+                        <span className="text-gray-400 font-semibold">Bank Asal:</span>
+                        <span className="font-bold text-slate-700">BANK MANDIRI (PERSERO) TBK</span>
+                      </div>
+                      <div className="flex justify-between border-b border-gray-100 pb-1.5">
+                        <span className="text-gray-400 font-semibold">Penerima Dana (Kreditur):</span>
+                        <span className="font-bold text-slate-900">{transferProofTx.pic}</span>
+                      </div>
+                      <div className="flex justify-between border-b border-gray-100 pb-1.5">
+                        <span className="text-gray-400 font-semibold">Bank Penerima:</span>
+                        <span className="font-bold text-slate-700">BCA (BANK CENTRAL ASIA)</span>
+                      </div>
+                      <div className="flex justify-between border-b border-gray-100 pb-1.5">
+                        <span className="text-gray-400 font-semibold">No Rekening Tujuan:</span>
+                        <span className="font-mono font-bold text-slate-700">8625****** (Rek. Lapangan PIC)</span>
+                      </div>
+                      <div className="flex justify-between border-b border-gray-100 pb-1.5">
+                        <span className="text-gray-400 font-semibold">Referensi Pengajuan:</span>
+                        <span className="font-mono font-bold text-blue-700">{transferProofTx.petyCashNo}</span>
+                      </div>
+                      <div className="flex justify-between border-b border-gray-100 pb-1.5">
+                        <span className="text-gray-400 font-semibold">Tanggal & Waktu:</span>
+                        <span className="font-bold text-slate-700">{transferProofTx.date} - 10:45:12 WIB</span>
+                      </div>
+                      <div className="flex justify-between pt-1">
+                        <span className="text-gray-400 font-semibold">No. Referensi Bank:</span>
+                        <span className="font-mono font-bold text-slate-500">TRF-{transferProofTx.id.toUpperCase().replace("TX-", "")}</span>
+                      </div>
+                    </div>
+
+                    <div className="p-3 bg-slate-50 text-center text-[8.5px] text-slate-400 border-t border-gray-100 font-mono relative z-10">
+                      * Resi ini sah secara hukum perbankan dan dicetak elektronik otomatis oleh sistem keuangan perusahaan *
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* DRAG & DROP FILE UPLOAD AREA */}
+              {!isReadOnly && (
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block">
+                    Unggah Bukti Transfer Baru (Gambar)
+                  </label>
+                  
+                  <div
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      setDragActive(true);
+                    }}
+                    onDragLeave={() => setDragActive(false)}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      setDragActive(false);
+                      if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                        handleFileUpload(e.dataTransfer.files[0]);
+                      }
+                    }}
+                    onClick={() => {
+                      const fileInput = document.getElementById("proof-file-input");
+                      if (fileInput) fileInput.click();
+                    }}
+                    className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-all flex flex-col items-center justify-center gap-2 ${
+                      dragActive
+                        ? "border-blue-500 bg-blue-50 text-blue-700"
+                        : "border-gray-300 hover:border-blue-400 bg-white text-gray-500"
+                    }`}
+                  >
+                    <input
+                      id="proof-file-input"
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        if (e.target.files && e.target.files[0]) {
+                          handleFileUpload(e.target.files[0]);
+                        }
+                      }}
+                    />
+                    <Upload className="w-8 h-8 text-blue-500" />
+                    <div className="space-y-1">
+                      <p className="text-xs font-bold text-slate-700">
+                        Klik untuk memilih gambar atau seret file ke sini
+                      </p>
+                      <p className="text-[10px] text-gray-400">
+                        Mendukung file gambar PNG, JPG, atau JPEG (Maks. 5MB)
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer Controls */}
+            <div className="bg-gray-50 p-4 flex gap-3 justify-end border-t border-gray-100">
+              <button
+                type="button"
+                onClick={() => setTransferProofTx(null)}
+                className="px-4 py-2.5 bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 font-semibold rounded-xl text-xs transition-all cursor-pointer shadow-sm w-full sm:w-auto text-center"
+              >
+                Selesai & Tutup
               </button>
             </div>
           </div>

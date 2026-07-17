@@ -6,7 +6,7 @@
 import React from "react";
 import { Project, Transaction, Category, PetyCashItem } from "../types";
 import { CATEGORIES } from "../data";
-import { Plus, ListFilter, Search, Receipt, Trash2, HelpCircle, AlertTriangle, ShieldCheck, Landmark, CheckSquare, Calendar, ChevronDown, ChevronUp, Printer, User, Send, CheckCircle2, Edit2 } from "lucide-react";
+import { Plus, ListFilter, Search, Receipt, Trash2, HelpCircle, AlertTriangle, ShieldCheck, Landmark, CheckSquare, Calendar, ChevronDown, ChevronUp, Printer, User, Send, CheckCircle2, Edit2, FileText, X, Check } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { printVoucher } from "./PetyCashRequestManager";
 
@@ -119,6 +119,7 @@ export default function PetyCashExpenseManager({
   const [validationError, setValidationError] = React.useState<string | null>(null);
   const [expenseToDelete, setExpenseToDelete] = React.useState<string | null>(null);
   const [alertMessage, setAlertMessage] = React.useState<string | null>(null);
+  const [pdfViewExpense, setPdfViewExpense] = React.useState<Transaction | null>(null);
 
   React.useEffect(() => {
     if (alertMessage) {
@@ -159,6 +160,66 @@ export default function PetyCashExpenseManager({
   }, [projectId, projects]);
 
   const [isManualNo, setIsManualNo] = React.useState(false);
+
+  // AUTO-SAVE & AUTO-LOAD DRAFT FOR PETY CASH EXPENSE FORM
+  React.useEffect(() => {
+    const savedDraft = localStorage.getItem("pety_cash_expense_draft");
+    if (savedDraft) {
+      try {
+        const draft = JSON.parse(savedDraft);
+        if (draft) {
+          if (draft.projectId) setProjectId(draft.projectId);
+          if (draft.pic) setPic(draft.pic);
+          if (draft.date) setDate(draft.date);
+          if (draft.petyCashNo) setPetyCashNo(draft.petyCashNo);
+          if (draft.status) setStatus(draft.status);
+          if (draft.description) setDescription(draft.description);
+          if (draft.paymentMethod) setPaymentMethod(draft.paymentMethod);
+          if (draft.selectedRequestIdForExpense !== undefined) setSelectedRequestIdForExpense(draft.selectedRequestIdForExpense);
+          if (draft.company) setCompany(draft.company);
+          if (draft.customCompany) setCustomCompany(draft.customCompany);
+          if (draft.currentItems) setCurrentItems(draft.currentItems);
+          if (draft.showAddForm !== undefined) setShowAddForm(draft.showAddForm);
+        }
+      } catch (err) {
+        console.error("Error loading pety cash expense draft", err);
+      }
+    }
+  }, []);
+
+  React.useEffect(() => {
+    if (!editingExpenseId) {
+      const draft = {
+        projectId,
+        pic,
+        date,
+        petyCashNo,
+        status,
+        description,
+        paymentMethod,
+        selectedRequestIdForExpense,
+        company,
+        customCompany,
+        currentItems,
+        showAddForm
+      };
+      localStorage.setItem("pety_cash_expense_draft", JSON.stringify(draft));
+    }
+  }, [
+    projectId,
+    pic,
+    date,
+    petyCashNo,
+    status,
+    description,
+    paymentMethod,
+    selectedRequestIdForExpense,
+    company,
+    customCompany,
+    currentItems,
+    showAddForm,
+    editingExpenseId
+  ]);
 
   // Filter States
   const [filterProject, setFilterProject] = React.useState<string>("all");
@@ -1229,12 +1290,20 @@ export default function PetyCashExpenseManager({
                         </td>
 
                         {/* Actions */}
-                        <td className="p-3.5 text-right">
+                        <td className="p-3.5 text-right font-sans">
                           <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              onClick={() => setPdfViewExpense(tx)}
+                              className="text-blue-600 hover:text-blue-800 p-1.5 rounded-lg hover:bg-blue-50 transition-colors cursor-pointer flex items-center gap-1 font-extrabold text-[10px] border border-blue-200"
+                              title="Lihat & Cetak PDF Pengeluaran"
+                            >
+                              <FileText className="w-3.5 h-3.5" />
+                              <span>PDF</span>
+                            </button>
                             <button
                               onClick={() => printVoucher(tx, proj)}
                               className="text-slate-600 hover:text-blue-600 p-1.5 rounded hover:bg-slate-100 transition-colors cursor-pointer"
-                              title="Cetak Voucher Realisasi (Print)"
+                              title="Cetak Voucher Realisasi Langsung (Print)"
                             >
                               <Printer className="w-4 h-4" />
                             </button>
@@ -1361,6 +1430,210 @@ export default function PetyCashExpenseManager({
                 className="px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-xl text-xs transition-all cursor-pointer shadow-md flex items-center gap-1.5 hover:shadow-lg hover:shadow-red-500/15"
               >
                 <Trash2 className="w-3.5 h-3.5" /> Ya, Hapus
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PDF PREVIEW MODAL */}
+      {pdfViewExpense && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-slate-100 rounded-2xl max-w-2xl w-full shadow-2xl overflow-hidden border border-slate-200 animate-in fade-in zoom-in-95 duration-200 flex flex-col my-8">
+            {/* Modal Header */}
+            <div className="bg-slate-900 text-white px-6 py-4 flex items-center justify-between border-b border-slate-800 font-sans">
+              <div className="flex items-center gap-2">
+                <FileText className="w-5 h-5 text-blue-400" />
+                <div>
+                  <h3 className="text-sm font-bold">Pratinjau Voucher Pengeluaran PDF</h3>
+                  <p className="text-[10px] text-slate-400 font-medium">Tampilan fisik kuitansi pengeluaran kas kecil</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setPdfViewExpense(null)}
+                className="text-slate-400 hover:text-white p-1 rounded-full hover:bg-slate-800/50 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Document Sheet Container */}
+            <div className="p-6 overflow-y-auto max-h-[70vh] bg-slate-200 flex justify-center">
+              <div id="pdf-document-sheet" className="bg-white shadow-xl w-full p-8 border border-gray-300 text-slate-800 text-[11px] text-left font-sans select-none relative rounded-sm max-w-lg">
+                
+                {/* WATERMARK STAMP */}
+                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 -rotate-12 border-4 border-dashed border-emerald-500/15 rounded-xl px-6 py-3 font-mono font-extrabold text-3xl text-emerald-500/15 tracking-widest pointer-events-none select-none uppercase">
+                  {pdfViewExpense.status || "Sudah Proses"}
+                </div>
+
+                {/* Company & Document Header */}
+                <div className="flex justify-between items-start border-b-2 border-slate-900 pb-4 mb-4">
+                  <div>
+                    <h1 className="text-sm font-bold text-slate-900 tracking-tight uppercase">
+                      {pdfViewExpense.company || "CV. Mandiri Cipta Jaya"}
+                    </h1>
+                    <p className="text-[9px] text-gray-500 leading-tight">
+                      Kontraktor & Penyuplai Mekanikal Elektrikal Sipil
+                    </p>
+                    <p className="text-[8px] text-gray-400 mt-0.5">
+                      Ruko Taman Yasmin Sektor VI, Jl. KH. R. Abdullah Bin Nuh No. 24, Bogor
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <h2 className="text-xs font-bold text-red-900 tracking-wider uppercase">
+                      VOUCHER PENGELUARAN PETTY CASH
+                    </h2>
+                    <p className="text-[9px] text-gray-500">Realisasi & Bukti Bayar Kas Kecil</p>
+                    <div className="mt-1 inline-block bg-slate-100 px-2 py-0.5 rounded font-mono text-[9px] font-bold text-slate-700">
+                      Ref: {pdfViewExpense.petyCashNo || "-"}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Metadata Fields Grid */}
+                <div className="grid grid-cols-2 gap-x-6 gap-y-2 mb-5 bg-slate-50 border border-slate-200 rounded-lg p-3">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-1">
+                    <span className="text-gray-500 font-semibold">No. Voucher:</span>
+                    <span className="font-bold text-slate-900 font-mono">{pdfViewExpense.petyCashNo || "-"}</span>
+                  </div>
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-1">
+                    <span className="text-gray-500 font-semibold">Tanggal:</span>
+                    <span className="font-bold text-slate-900">{pdfViewExpense.date}</span>
+                  </div>
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-1">
+                    <span className="text-gray-500 font-semibold">PIC Lapangan:</span>
+                    <span className="font-bold text-slate-900">{pdfViewExpense.pic}</span>
+                  </div>
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-1">
+                    <span className="text-gray-500 font-semibold">Metode Bayar:</span>
+                    <span className="font-bold text-slate-900 uppercase">{pdfViewExpense.paymentMethod || "Tunai"}</span>
+                  </div>
+                  <div className="col-span-2 flex items-start justify-between">
+                    <span className="text-gray-500 font-semibold shrink-0 mr-4">Proyek Terkait:</span>
+                    <span className="font-bold text-slate-900 text-right truncate">
+                      {(() => {
+                        const prj = projects.find((p) => p.id === pdfViewExpense.projectId);
+                        return prj ? `[${prj.code}] ${prj.name}` : "Proyek Dihapus";
+                      })()}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Description Heading */}
+                <div className="mb-2">
+                  <span className="text-[10px] uppercase font-bold text-slate-700 border-b border-slate-300 pb-0.5 block">
+                    Keterangan Realisasi Belanja
+                  </span>
+                  <p className="text-[10px] text-slate-900 italic mt-1 bg-yellow-50/50 p-2 border border-yellow-100 rounded leading-relaxed">
+                    "{pdfViewExpense.description}"
+                  </p>
+                </div>
+
+                {/* Items List Table */}
+                <div className="mb-6 border border-slate-200 rounded overflow-hidden">
+                  <table className="w-full text-left text-[10px] border-collapse">
+                    <thead>
+                      <tr className="bg-slate-900 text-white font-bold text-[9px] uppercase">
+                        <th className="p-2 w-8 text-center border-r border-slate-800">No</th>
+                        <th className="p-2 border-r border-slate-800">Rincian Keperluan / Nama Barang Realisasi</th>
+                        <th className="p-2 w-28 text-center border-r border-slate-800">Kategori Anggaran</th>
+                        <th className="p-2 w-28 text-right">Nominal Pengeluaran</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {pdfViewExpense.items && pdfViewExpense.items.length > 0 ? (
+                        pdfViewExpense.items.map((item, idx) => (
+                          <tr key={item.id} className="hover:bg-slate-50">
+                            <td className="p-2 text-center text-gray-400 font-mono border-r border-slate-100">{idx + 1}</td>
+                            <td className="p-2 font-medium text-slate-800 border-r border-slate-100">{item.description}</td>
+                            <td className="p-2 text-center border-r border-slate-100">
+                              <span className="text-[8px] font-bold px-1.5 py-0.25 rounded bg-blue-50 text-blue-700 border border-blue-100 uppercase">
+                                {item.category}
+                              </span>
+                            </td>
+                            <td className="p-2 text-right font-mono font-bold text-slate-900">{formatIDR(item.amount)}</td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr className="hover:bg-slate-50">
+                          <td className="p-2 text-center text-gray-400 font-mono border-r border-slate-100">1</td>
+                          <td className="p-2 font-medium text-slate-800 border-r border-slate-100">{pdfViewExpense.description}</td>
+                          <td className="p-2 text-center border-r border-slate-100">
+                            <span className="text-[8px] font-bold px-1.5 py-0.25 rounded bg-blue-50 text-blue-700 border border-blue-100 uppercase">
+                              {pdfViewExpense.category}
+                            </span>
+                          </td>
+                          <td className="p-2 text-right font-mono font-bold text-slate-900">{formatIDR(pdfViewExpense.amount)}</td>
+                        </tr>
+                      )}
+                      <tr className="bg-slate-100 font-extrabold border-t border-slate-300">
+                        <td colSpan={3} className="p-2 text-right text-slate-700 text-[9px] uppercase tracking-wider">
+                          TOTAL PENGELUARAN REALISASI:
+                        </td>
+                        <td className="p-2 text-right font-mono text-red-600 text-xs border-l border-slate-200">
+                          {formatIDR(pdfViewExpense.amount)}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Signature Grid section */}
+                <div className="grid grid-cols-4 gap-2 text-[9px] border border-slate-200 rounded p-2 bg-slate-50">
+                  <div className="text-center flex flex-col justify-between h-20">
+                    <span className="text-gray-500 uppercase font-bold text-[8px] block border-b border-slate-100 pb-1">Dibuat Oleh</span>
+                    <span className="font-extrabold text-slate-800 truncate px-1">{pdfViewExpense.pic}</span>
+                    <span className="text-gray-400 text-[8px] uppercase tracking-tight block border-t border-slate-100 pt-1">Penerima Kas</span>
+                  </div>
+                  <div className="text-center flex flex-col justify-between h-20 border-l border-slate-200">
+                    <span className="text-gray-500 uppercase font-bold text-[8px] block border-b border-slate-100 pb-1">Diperiksa Oleh</span>
+                    <span className="text-gray-600 font-bold text-[9px] border border-blue-200 rounded px-1 py-0.5 mx-1 bg-blue-50/30 self-center leading-tight">
+                      VERIFIED<br />{pdfViewExpense.date}
+                    </span>
+                    <span className="text-gray-400 text-[8px] uppercase tracking-tight block border-t border-slate-100 pt-1">Site Supervisor</span>
+                  </div>
+                  <div className="text-center flex flex-col justify-between h-20 border-l border-slate-200">
+                    <span className="text-gray-500 uppercase font-bold text-[8px] block border-b border-slate-100 pb-1">Disetujui Oleh</span>
+                    <span className="text-blue-600 font-mono font-bold text-[9px] border border-blue-200 rounded px-1 py-0.5 mx-1 bg-blue-50/50 self-center leading-tight">
+                      APPROVED<br />{pdfViewExpense.date}
+                    </span>
+                    <span className="text-gray-400 text-[8px] uppercase tracking-tight block border-t border-slate-100 pt-1">Project Manager</span>
+                  </div>
+                  <div className="text-center flex flex-col justify-between h-20 border-l border-slate-200">
+                    <span className="text-gray-500 uppercase font-bold text-[8px] block border-b border-slate-100 pb-1">Dibayarkan Oleh</span>
+                    <span className="text-emerald-600 font-mono font-bold text-[9px] border border-emerald-200 rounded px-1 py-0.5 mx-1 bg-emerald-50/50 self-center leading-tight">
+                      LUNAS / PAID<br />{pdfViewExpense.date}
+                    </span>
+                    <span className="text-gray-400 text-[8px] uppercase tracking-tight block border-t border-slate-100 pt-1">Finance / Kasir</span>
+                  </div>
+                </div>
+
+                {/* Footer disclaimer */}
+                <div className="mt-4 pt-2 border-t border-slate-200 flex justify-between text-[7px] text-gray-400">
+                  <span>Dokumen ini diterbitkan secara sah dan terekam dalam Sistem Keuangan Terpadu.</span>
+                  <span className="font-mono">ID: {pdfViewExpense.id}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer Controls */}
+            <div className="bg-slate-50 p-4 flex gap-3 justify-end border-t border-slate-200 font-sans">
+              <button
+                type="button"
+                onClick={() => setPdfViewExpense(null)}
+                className="px-4 py-2.5 bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 font-semibold rounded-xl text-xs transition-all cursor-pointer shadow-sm"
+              >
+                Tutup
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const prj = projects.find((p) => p.id === pdfViewExpense.projectId);
+                  printVoucher(pdfViewExpense, prj);
+                }}
+                className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs transition-all cursor-pointer shadow-md flex items-center gap-2 hover:shadow-lg hover:shadow-blue-500/15"
+              >
+                <Printer className="w-4 h-4" /> Cetak Dokumen PDF
               </button>
             </div>
           </div>

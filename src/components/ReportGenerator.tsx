@@ -6,7 +6,7 @@
 import React from "react";
 import { Project, Transaction, Category } from "../types";
 import { COMPANY_INFO, CATEGORIES } from "../data";
-import { FileText, Printer, Calendar, ArrowRightLeft, CheckCircle2, TrendingUp, HelpCircle } from "lucide-react";
+import { FileText, Printer, Calendar, ArrowRightLeft, CheckCircle2, TrendingUp, HelpCircle, FileSpreadsheet } from "lucide-react";
 import { motion } from "motion/react";
 
 interface ReportGeneratorProps {
@@ -193,6 +193,139 @@ export default function ReportGenerator({ projects, transactions, selectedProjec
 
   const handlePrint = () => {
     window.print();
+  };
+
+  const handleExportExcel = () => {
+    let html = `
+      <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+      <head>
+        <!--[if gte mso 9]>
+        <xml>
+          <x:ExcelWorkbook>
+            <x:ExcelWorksheets>
+              <x:ExcelWorksheet>
+                <x:Name>Laporan Keuangan</x:Name>
+                <x:WorksheetOptions>
+                  <x:DisplayGridlines/>
+                </x:WorksheetOptions>
+              </x:ExcelWorksheet>
+            </x:ExcelWorksheets>
+          </x:ExcelWorkbook>
+        </xml>
+        <![endif]-->
+        <style>
+          table { border-collapse: collapse; width: 100%; font-family: sans-serif; }
+          th { background-color: #0f172a; color: #ffffff; font-weight: bold; padding: 8px; border: 1px solid #cbd5e1; }
+          td { padding: 8px; border: 1px solid #cbd5e1; }
+          .title { font-size: 16px; font-weight: bold; margin-bottom: 4px; text-align: center; }
+          .subtitle { font-size: 11px; color: #64748b; margin-bottom: 12px; text-align: center; }
+          .section-title { font-size: 12px; font-weight: bold; margin-top: 16px; margin-bottom: 6px; }
+          .right { text-align: right; }
+          .font-mono { font-family: monospace; }
+        </style>
+      </head>
+      <body>
+        <div class="title">${compDetails.name}</div>
+        <div class="subtitle">${compDetails.subName} - ${compDetails.address}</div>
+        <div class="title" style="font-size:14px; margin-top:10px;">LAPORAN REKAPITULASI BIAYA PROYEK</div>
+        <div class="subtitle">Periode: ${reportType === "monthly" ? `Bulan ${selectedMonth}` : reportType === "weekly" ? `Bulan ${selectedMonth} - Minggu ke-${selectedWeek}` : `${startDate} s.d. ${endDate}`}</div>
+        <br/>
+        
+        <table style="margin-bottom: 20px;">
+          <tr>
+            <td><strong>Proyek:</strong></td>
+            <td>${currentProject ? `[${currentProject.code}] ${currentProject.name}` : 'Semua Proyek'}</td>
+            <td><strong>Manajer Proyek:</strong></td>
+            <td>${currentProject?.manager || '-'}</td>
+          </tr>
+          <tr>
+            <td><strong>PIC Lapangan:</strong></td>
+            <td>${currentProject?.pic || '-'}</td>
+            <td><strong>Status Proyek:</strong></td>
+            <td>${currentProject?.status || '-'}</td>
+          </tr>
+        </table>
+
+        <div class="section-title">A. Rincian Pengeluaran Berdasarkan Kategori</div>
+        <table>
+          <thead>
+            <tr>
+              <th style="background-color: #0f172a; color: #ffffff;">No</th>
+              <th style="background-color: #0f172a; color: #ffffff;">Kategori Pengeluaran</th>
+              <th style="background-color: #0f172a; color: #ffffff; text-align: right;">Total Biaya (RP)</th>
+              <th style="background-color: #0f172a; color: #ffffff; text-align: right;">Persentase</th>
+            </tr>
+          </thead>
+          <tbody>
+    `;
+
+    categoryAggregate.forEach((item, index) => {
+      html += `
+        <tr>
+          <td>${index + 1}</td>
+          <td><strong>${item.category}</strong></td>
+          <td class="right font-mono">${formatIDR(item.total)}</td>
+          <td class="right font-mono">${((item.total / grandTotal) * 100).toFixed(1)}%</td>
+        </tr>
+      `;
+    });
+
+    html += `
+          <tr style="background-color: #f1f5f9; font-weight: bold;">
+            <td colspan="2">TOTAL SELURUH PENGELUARAN</td>
+            <td class="right font-mono" style="color: #dc2626;">${formatIDR(grandTotal)}</td>
+            <td class="right font-mono">100%</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <br/>
+      <div class="section-title">B. Log Buku Kas / Detail Transaksi Lapangan</div>
+      <table>
+        <thead>
+          <tr>
+            <th style="background-color: #0f172a; color: #ffffff;">Tanggal</th>
+            <th style="background-color: #0f172a; color: #ffffff;">No Kas / Invoice</th>
+            <th style="background-color: #0f172a; color: #ffffff;">PIC</th>
+            <th style="background-color: #0f172a; color: #ffffff;">Deskripsi Pekerjaan / Belanja</th>
+            <th style="background-color: #0f172a; color: #ffffff;">Kategori</th>
+            <th style="background-color: #0f172a; color: #ffffff; text-align: right;">Jumlah (RP)</th>
+          </tr>
+        </thead>
+        <tbody>
+    `;
+
+    filteredTxs.forEach((tx) => {
+      html += `
+        <tr>
+          <td>${tx.date}</td>
+          <td>${tx.petyCashNo || tx.invoiceNo || "-"}</td>
+          <td>${tx.pic}</td>
+          <td>${tx.description}</td>
+          <td>${tx.category}</td>
+          <td class="right font-mono">${formatIDR(tx.amount)}</td>
+        </tr>
+      `;
+    });
+
+    html += `
+        </tbody>
+      </table>
+      <br/>
+      <p><strong>Catatan Tambahan:</strong> <em>"${additionalNotes}"</em></p>
+      </body>
+      </html>
+    `;
+
+    const blob = new Blob([html], { type: "application/vnd.ms-excel" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `Laporan_Keuangan_${compDetails.initials.replace(/\\s+/g, '_')}_${reportType}_${Date.now()}.xls`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   };
 
   return (
@@ -438,7 +571,14 @@ export default function ReportGenerator({ projects, transactions, selectedProjec
           </div>
         </div>
 
-        <div className="flex justify-end pt-2">
+        <div className="flex justify-end gap-3 pt-2">
+          <button
+            type="button"
+            onClick={handleExportExcel}
+            className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs px-5 py-2.5 rounded-xl shadow-md transition-all flex items-center gap-2 cursor-pointer"
+          >
+            <FileSpreadsheet className="w-4 h-4" /> Ekspor Excel (.xls)
+          </button>
           <button
             type="button"
             onClick={handlePrint}

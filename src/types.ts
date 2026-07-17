@@ -85,6 +85,7 @@ export interface Transaction {
   contractItems?: ContractItem[];
   company?: string;
   requestId?: string;
+  transferProof?: string;
 }
 
 export interface MonthlyBudget {

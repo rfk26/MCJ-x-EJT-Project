@@ -76,7 +76,14 @@ export default function NotificationCenter({
   const [isOpen, setIsOpen] = React.useState(false);
   const [dismissedAlerts, setDismissedAlerts] = React.useState<string[]>(() => {
     const saved = localStorage.getItem("mcj_dismissed_alerts");
-    return saved ? JSON.parse(saved) : [];
+    if (!saved || saved === "undefined" || saved === "null") return [];
+    try {
+      const parsed = JSON.parse(saved);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+      console.warn("Failed to parse mcj_dismissed_alerts:", e);
+      return [];
+    }
   });
 
   // Sync / regenerate alerts based on current state

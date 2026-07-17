@@ -48,9 +48,11 @@ export default function BackupManager({
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        setAutoBackups(parsed);
-        if (parsed.length > 0) {
-          setLastAutoBackupTime(parsed[0].timestamp);
+        if (Array.isArray(parsed)) {
+          setAutoBackups(parsed);
+          if (parsed.length > 0) {
+            setLastAutoBackupTime(parsed[0].timestamp);
+          }
         }
       } catch (e) {
         console.error("Failed to parse auto-backups", e);
@@ -68,7 +70,10 @@ export default function BackupManager({
     let currentHistory: LocalBackup[] = [];
     if (saved) {
       try {
-        currentHistory = JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          currentHistory = parsed;
+        }
       } catch (e) {}
     }
 

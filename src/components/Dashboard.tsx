@@ -38,6 +38,16 @@ export default function Dashboard({
     }).format(val);
   };
 
+  const formatShortVal = (val: number) => {
+    if (val >= 1000000000) {
+      return (val / 1000000000).toFixed(1) + " M";
+    }
+    if (val >= 1000000) {
+      return (val / 1000000).toFixed(0) + " Jt";
+    }
+    return val > 0 ? (val / 1000).toFixed(0) + " K" : "0";
+  };
+
   const getProjectContractValue = (p: Project) => {
     if (p.customContractItems && p.customContractItems.length > 0) {
       return p.customContractItems.reduce((s, item) => s + Number(item.value || 0), 0);
@@ -415,12 +425,31 @@ export default function Dashboard({
           {/* SVG Area Chart */}
           <div className="h-64 relative flex flex-col justify-end">
             <svg className="w-full h-48 overflow-visible" viewBox="0 0 500 200">
-              {/* Grid Lines */}
-              <line x1="0" y1="0" x2="500" y2="0" stroke="#f1f5f9" strokeWidth="1" />
-              <line x1="0" y1="50" x2="500" y2="50" stroke="#f1f5f9" strokeWidth="1" />
-              <line x1="0" y1="100" x2="500" y2="100" stroke="#f1f5f9" strokeWidth="1" />
-              <line x1="0" y1="150" x2="500" y2="150" stroke="#f1f5f9" strokeWidth="1" />
-              <line x1="0" y1="200" x2="500" y2="200" stroke="#e2e8f0" strokeWidth="1.5" />
+              {/* Dynamic Grid Lines & Labels */}
+              {[0, 0.25, 0.5, 0.75, 1].map((ratio, index) => {
+                const maxTrendVal = Math.max(...monthlyTrend.map((m) => m.total), 10000000);
+                const y = 200 - ratio * 180;
+                const labelValue = ratio * maxTrendVal;
+                return (
+                  <g key={index}>
+                    <line
+                      x1="0"
+                      y1={y}
+                      x2="500"
+                      y2={y}
+                      stroke={index === 0 ? "#e2e8f0" : "#f1f5f9"}
+                      strokeWidth={index === 0 ? "1.5" : "1"}
+                    />
+                    <text
+                      x="4"
+                      y={y - 4}
+                      className="font-mono text-[9px] fill-gray-400 font-medium"
+                    >
+                      {formatShortVal(labelValue)}
+                    </text>
+                  </g>
+                );
+              })}
 
               {/* Draw area and line path of trends */}
               {(() => {
@@ -446,7 +475,7 @@ export default function Dashboard({
                       <g key={idx}>
                         <circle cx={p.x} cy={p.y} r="4.5" fill="#ffffff" stroke="#2563eb" strokeWidth="2.5" />
                         <text x={p.x} y={p.y - 10} textAnchor="middle" className="font-mono text-[9px] font-bold fill-gray-600">
-                          {p.val > 0 ? (p.val / 1000000).toFixed(1) + "M" : ""}
+                          {p.val > 0 ? formatShortVal(p.val) : ""}
                         </text>
                       </g>
                     ))}
@@ -580,16 +609,6 @@ export default function Dashboard({
                   ...filteredProjectBudgetData.map((d) => Math.max(d.contractVal, d.spending)),
                   100000000 // min 100M for reasonable scaling
                 );
-
-                const formatShortVal = (val: number) => {
-                  if (val >= 1000000000) {
-                    return (val / 1000000000).toFixed(1) + " M";
-                  }
-                  if (val >= 1000000) {
-                    return (val / 1000000).toFixed(0) + " Jt";
-                  }
-                  return val > 0 ? (val / 1000).toFixed(0) + " K" : "0";
-                };
 
                 return (
                   <div style={{ minWidth: `${chartWidth}px` }} className="w-full relative">
@@ -899,17 +918,39 @@ export default function Dashboard({
         <div className="bg-slate-50 border border-gray-250 rounded-2xl p-6 space-y-4">
           <div>
             <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">Visualisasi Perbandingan Keuangan Antar Perusahaan</h4>
-            <p className="text-[10px] text-gray-500 mt-0.5">Grafik perbandingan nilai kontrak bersih, total belanja (aktual), dan realisasi invoice yang dicairkan (Miliar Rupiah).</p>
+            <p className="text-[10px] text-gray-500 mt-0.5">Grafik perbandingan nilai kontrak bersih, total belanja (aktual), dan realisasi invoice yang dicairkan.</p>
           </div>
 
           <div className="h-64 relative flex flex-col justify-end">
             <svg className="w-full h-52 overflow-visible" viewBox="0 0 500 200">
-              {/* Horizontal guide lines */}
-              <line x1="0" y1="0" x2="500" y2="0" stroke="#f1f5f9" strokeWidth="1" />
-              <line x1="0" y1="50" x2="500" y2="50" stroke="#f1f5f9" strokeWidth="1" />
-              <line x1="0" y1="100" x2="500" y2="100" stroke="#f1f5f9" strokeWidth="1" />
-              <line x1="0" y1="150" x2="500" y2="150" stroke="#f1f5f9" strokeWidth="1" />
-              <line x1="0" y1="200" x2="500" y2="200" stroke="#e2e8f0" strokeWidth="1.5" />
+              {/* Dynamic Grid Lines & Labels */}
+              {[0, 0.25, 0.5, 0.75, 1].map((ratio, index) => {
+                const maxVal = Math.max(
+                  ...companyAnalytics.map((c) => Math.max(c.netContract, c.spending, c.invoiced)),
+                  100000000
+                );
+                const y = 200 - ratio * 165;
+                const labelValue = ratio * maxVal;
+                return (
+                  <g key={index}>
+                    <line
+                      x1="0"
+                      y1={y}
+                      x2="500"
+                      y2={y}
+                      stroke={index === 0 ? "#e2e8f0" : "#f1f5f9"}
+                      strokeWidth={index === 0 ? "1.5" : "1"}
+                    />
+                    <text
+                      x="4"
+                      y={y - 4}
+                      className="font-mono text-[9px] fill-gray-400 font-medium"
+                    >
+                      {formatShortVal(labelValue)}
+                    </text>
+                  </g>
+                );
+              })}
 
               {(() => {
                 const maxVal = Math.max(
@@ -951,7 +992,7 @@ export default function Dashboard({
                         textAnchor="middle"
                         className="font-mono text-[8.5px] font-bold fill-blue-700"
                       >
-                        {comp.netContract > 0 ? (comp.netContract / 1000000).toFixed(0) + "M" : "0"}
+                        {comp.netContract > 0 ? formatShortVal(comp.netContract) : "0"}
                       </text>
 
                       {/* Bar 2: Spending (Red) */}
@@ -970,7 +1011,7 @@ export default function Dashboard({
                         textAnchor="middle"
                         className="font-mono text-[8.5px] font-bold fill-red-600"
                       >
-                        {comp.spending > 0 ? (comp.spending / 1000000).toFixed(0) + "M" : "0"}
+                        {comp.spending > 0 ? formatShortVal(comp.spending) : "0"}
                       </text>
 
                       {/* Bar 3: Invoiced (Emerald) */}
@@ -989,7 +1030,7 @@ export default function Dashboard({
                         textAnchor="middle"
                         className="font-mono text-[8.5px] font-bold fill-emerald-600"
                       >
-                        {comp.invoiced > 0 ? (comp.invoiced / 1000000).toFixed(0) + "M" : "0"}
+                        {comp.invoiced > 0 ? formatShortVal(comp.invoiced) : "0"}
                       </text>
                     </g>
                   );

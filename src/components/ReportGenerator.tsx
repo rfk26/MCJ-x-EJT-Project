@@ -6,8 +6,10 @@
 import React from "react";
 import { Project, Transaction, Category } from "../types";
 import { COMPANY_INFO, CATEGORIES } from "../data";
-import { FileText, Printer, Calendar, ArrowRightLeft, CheckCircle2, TrendingUp, HelpCircle, FileSpreadsheet } from "lucide-react";
+import { FileText, Printer, Calendar, ArrowRightLeft, CheckCircle2, TrendingUp, HelpCircle, FileSpreadsheet, Download, Loader2 } from "lucide-react";
 import { motion } from "motion/react";
+import jsPDF from "jspdf";
+import html2canvas from "html2canvas";
 
 interface ReportGeneratorProps {
   projects: Project[];
@@ -27,6 +29,7 @@ export default function ReportGenerator({ projects, transactions, selectedProjec
   const [additionalNotes, setAdditionalNotes] = React.useState<string>(
     "Pekerjaan berjalan lancar sesuai estimasi. Pembayaran pety cash terkontrol dengan baik, dan penghematan material berhasil dicapai pada beberapa pos pekerjaan."
   );
+  const [isGeneratingPDF, setIsGeneratingPDF] = React.useState<boolean>(false);
 
   const [createdBy, setCreatedBy] = React.useState<string>("");
   const [createdRole, setCreatedRole] = React.useState<string>("Pengawas Lapangan");
@@ -328,6 +331,72 @@ export default function ReportGenerator({ projects, transactions, selectedProjec
     URL.revokeObjectURL(url);
   };
 
+  const handleExportPDF = async () => {
+    const element = document.getElementById("formal-document-view");
+    if (!element) return;
+
+    setIsGeneratingPDF(true);
+
+    try {
+      // 1. Temporarily apply styling for perfect A4 layout capture
+      const originalStyle = element.getAttribute("style") || "";
+      
+      // We force a standard width of 794px which corresponds to an A4 layout at 96 DPI.
+      // This guarantees tables, columns, text alignments and signature block wrap beautifully
+      // and look identical regardless of screen size.
+      element.style.width = "794px";
+      element.style.maxWidth = "794px";
+      element.style.minWidth = "794px";
+      element.style.boxShadow = "none";
+      element.style.border = "none";
+      element.style.borderRadius = "0";
+
+      // 2. Generate canvas with high-dpi scale for crisp vector-like typography
+      const canvas = await html2canvas(element, {
+        scale: 2.5, // 2.5x scale gives super-crisp, high-definition text when printed/zoomed
+        useCORS: true,
+        logging: false,
+        backgroundColor: "#ffffff",
+      });
+
+      // Restore original styling
+      element.setAttribute("style", originalStyle);
+
+      // 3. Setup PDF document parameters
+      const imgWidth = 210; // A4 Width in mm
+      const pageHeight = 297; // A4 Height in mm
+      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+      let heightLeft = imgHeight;
+
+      const doc = new jsPDF("p", "mm", "a4");
+      let position = 0;
+
+      // Convert canvas to premium JPEG image with high quality
+      const imgData = canvas.toDataURL("image/jpeg", 1.0);
+
+      // Add first page
+      doc.addImage(imgData, "JPEG", 0, position, imgWidth, imgHeight);
+      heightLeft -= pageHeight;
+
+      // Add remaining pages if content overflows A4 height
+      while (heightLeft > 0) {
+        position = heightLeft - imgHeight; // Shifts the canvas image upwards by one page-height
+        doc.addPage();
+        doc.addImage(imgData, "JPEG", 0, position, imgWidth, imgHeight);
+        heightLeft -= pageHeight;
+      }
+
+      // Save PDF with clear corporate descriptive name
+      const fileName = `Laporan_Resmi_${compDetails.initials.replace(/\s+/g, '_')}_${selectedMonth}_${Date.now()}.pdf`;
+      doc.save(fileName);
+    } catch (error) {
+      console.error("Gagal mengekspor PDF:", error);
+      alert("Terjadi kesalahan saat membuat PDF. Silakan coba kembali.");
+    } finally {
+      setIsGeneratingPDF(false);
+    }
+  };
+
   return (
     <div className="space-y-6 font-sans pb-16" id="report-generator-container">
       {/* CONTROL BOARD */}
@@ -571,7 +640,7 @@ export default function ReportGenerator({ projects, transactions, selectedProjec
           </div>
         </div>
 
-        <div className="flex justify-end gap-3 pt-2">
+        <div className="flex justify-end gap-3 pt-2 flex-wrap">
           <button
             type="button"
             onClick={handleExportExcel}
@@ -581,10 +650,32 @@ export default function ReportGenerator({ projects, transactions, selectedProjec
           </button>
           <button
             type="button"
-            onClick={handlePrint}
-            className="bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs px-5 py-2.5 rounded-xl shadow-md transition-all flex items-center gap-2 cursor-pointer"
+            disabled={isGeneratingPDF}
+            onClick={handleExportPDF}
+            className={`font-semibold text-xs px-5 py-2.5 rounded-xl shadow-md transition-all flex items-center gap-2 cursor-pointer ${
+              isGeneratingPDF
+                ? "bg-rose-400 text-white cursor-not-allowed"
+                : "bg-rose-600 hover:bg-rose-700 text-white"
+            }`}
           >
-            <Printer className="w-4 h-4" /> Cetak / Ekspor PDF Laporan Resmi
+            {isGeneratingPDF ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Mengekspor ke PDF...
+              </>
+            ) : (
+              <>
+                <Download className="w-4 h-4" />
+                Ekspor PDF Resmi (.pdf)
+              </>
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={handlePrint}
+            className="bg-slate-700 hover:bg-slate-800 text-white font-semibold text-xs px-5 py-2.5 rounded-xl shadow-md transition-all flex items-center gap-2 cursor-pointer"
+          >
+            <Printer className="w-4 h-4" /> Cetak Laporan
           </button>
         </div>
       </div>

@@ -258,6 +258,7 @@ export default function SalaryManager({
   const [date, setDate] = React.useState(new Date().toISOString().split("T")[0]);
   const [paymentMethod, setPaymentMethod] = React.useState("Transfer Bank");
   const [description, setDescription] = React.useState("");
+  const [manualSlipNo, setManualSlipNo] = React.useState("");
 
   // Dynamic Salary Components Builders (Like Petty Cash Request Items)
   const [currentItems, setCurrentItems] = React.useState<Array<{ id: string; description: string; amount: number; isDeduction: boolean }>>([
@@ -368,6 +369,7 @@ export default function SalaryManager({
     setProjectId(tx.projectId);
     setEmployeeName(tx.pic);
     setDate(tx.date);
+    setManualSlipNo(tx.petyCashNo || "");
     setPaymentMethod(tx.paymentMethod || "Transfer Bank");
     setDescription(tx.description || "");
     
@@ -433,13 +435,17 @@ export default function SalaryManager({
       return;
     }
 
-    setValidationError(null);
-
     const yearMonth = date.substring(0, 7).replace("-", "");
     const totalGajiTransactionsCount = transactions.filter(t => t.category === "Gaji").length + 1;
-    const slipNo = editingSalaryId 
-      ? (transactions.find(t => t.id === editingSalaryId)?.petyCashNo || `PAY-${yearMonth}-${String(totalGajiTransactionsCount).padStart(3, "0")}`)
-      : `PAY-${yearMonth}-${String(totalGajiTransactionsCount).padStart(3, "0")}`;
+    const defaultAutoSlipNo = `PAY-${yearMonth}-${String(totalGajiTransactionsCount).padStart(3, "0")}`;
+    const slipNo = manualSlipNo.trim() || defaultAutoSlipNo;
+
+    if (!slipNo) {
+      setValidationError("Harap masukkan Nomor Slip Gaji!");
+      return;
+    }
+
+    setValidationError(null);
 
     const selectedProj = projects.find((p) => p.id === projectId);
     const finalCompanyName = company === "Lainnya" ? customCompany : company;
@@ -464,6 +470,7 @@ export default function SalaryManager({
                 projectId,
                 pic: employeeName,
                 date,
+                petyCashNo: slipNo,
                 company: finalCompanyName,
                 amount: netSalary,
                 description: descriptionText,
@@ -521,6 +528,7 @@ export default function SalaryManager({
 
     // Reset Form fields
     setEmployeeName("");
+    setManualSlipNo("");
     setEditingSalaryId(null);
     setCurrentItems([
       { id: "comp-1", description: "Gaji Pokok", amount: 0, isDeduction: false },
@@ -611,18 +619,27 @@ export default function SalaryManager({
         {!isReadOnly && (
           <button
             onClick={() => {
-              setEditingSalaryId(null);
-              setEmployeeName("");
-              setCurrentItems([
-                { id: "comp-1", description: "Gaji Pokok", amount: 0, isDeduction: false },
-                { id: "comp-2", description: "Tunjangan Makan & Transport", amount: 0, isDeduction: false },
-                { id: "comp-3", description: "Uang Lembur (Overtime)", amount: 0, isDeduction: false },
-                { id: "comp-4", description: "Tunjangan Lainnya", amount: 0, isDeduction: false },
-                { id: "comp-5", description: "Potongan Gaji", amount: 0, isDeduction: true },
-              ]);
-              setDescription("");
-              setShowAddForm(!showAddForm);
-              setValidationError(null);
+              if (showAddForm) {
+                setShowAddForm(false);
+                setValidationError(null);
+                setEditingSalaryId(null);
+              } else {
+                setEditingSalaryId(null);
+                setEmployeeName("");
+                const yearMonth = date.substring(0, 7).replace("-", "");
+                const totalGajiTransactionsCount = transactions.filter(t => t.category === "Gaji").length + 1;
+                setManualSlipNo(`PAY-${yearMonth}-${String(totalGajiTransactionsCount).padStart(3, "0")}`);
+                setCurrentItems([
+                  { id: "comp-1", description: "Gaji Pokok", amount: 0, isDeduction: false },
+                  { id: "comp-2", description: "Tunjangan Makan & Transport", amount: 0, isDeduction: false },
+                  { id: "comp-3", description: "Uang Lembur (Overtime)", amount: 0, isDeduction: false },
+                  { id: "comp-4", description: "Tunjangan Lainnya", amount: 0, isDeduction: false },
+                  { id: "comp-5", description: "Potongan Gaji", amount: 0, isDeduction: true },
+                ]);
+                setDescription("");
+                setShowAddForm(true);
+                setValidationError(null);
+              }
             }}
             className="bg-blue-600 hover:bg-blue-500 text-white font-extrabold text-xs px-4 py-3 rounded-xl transition-all cursor-pointer flex items-center gap-2 shadow-lg shadow-blue-500/10 min-h-[44px] shrink-0"
           >
@@ -700,7 +717,7 @@ export default function SalaryManager({
             )}
 
             <form onSubmit={handleSubmit} className="space-y-5 text-xs">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 {/* Project Selector */}
                 <div>
                   <label className="block text-[11px] font-extrabold text-gray-500 uppercase tracking-wider mb-1.5">
@@ -753,6 +770,26 @@ export default function SalaryManager({
                       value={date}
                       onChange={(e) => setDate(e.target.value)}
                       className="w-full bg-gray-50 border border-gray-200 rounded-xl pl-9 pr-3.5 py-3 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-blue-600/20 focus:bg-white"
+                    />
+                  </div>
+                </div>
+
+                {/* Manual No Slip Gaji */}
+                <div>
+                  <label className="block text-[11px] font-extrabold text-gray-500 uppercase tracking-wider mb-1.5">
+                    Nomor Slip Gaji <span className="text-red-500">*</span>
+                  </label>
+                  <div className="relative">
+                    <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-gray-400">
+                      <FileText className="w-4 h-4" />
+                    </span>
+                    <input
+                      type="text"
+                      placeholder="Contoh: PAY-202607-001"
+                      value={manualSlipNo}
+                      onChange={(e) => setManualSlipNo(e.target.value)}
+                      className="w-full bg-gray-50 border border-gray-200 rounded-xl pl-9 pr-3.5 py-3 text-xs font-mono font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-600/20 focus:bg-white"
+                      required
                     />
                   </div>
                 </div>
@@ -852,7 +889,7 @@ export default function SalaryManager({
 
                   <div className="text-right border-l border-gray-200 pl-5 pr-2">
                     <p className="text-[10px] font-extrabold text-gray-400 uppercase tracking-widest">Total Gaji Bersih (Netto)</p>
-                    <p className="text-xl font-black font-mono text-blue-600 animate-pulse">{formatIDR(netSalary)}</p>
+                    <p className="text-xl font-black font-mono text-blue-600">{formatIDR(netSalary)}</p>
                   </div>
                 </div>
               </div>

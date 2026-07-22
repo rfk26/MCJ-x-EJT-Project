@@ -34,9 +34,11 @@ import {
   X,
   Check,
   AlertCircle,
-  FileSpreadsheet
+  FileSpreadsheet,
+  ExternalLink
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
+import PdfViewerModal, { getPdfBlobUrl } from "./PdfViewerModal";
 
 export const printVoucher = (tx: Transaction, project: Project | undefined, companyName: string = tx.company || project?.company || "CV. Mandiri Cipta Jaya") => {
   const printWindow = window.open("", "_blank");
@@ -329,6 +331,7 @@ export default function PetyCashRequestManager({
   const [transferProofTx, setTransferProofTx] = React.useState<Transaction | null>(null);
   const [dragActive, setDragActive] = React.useState(false);
   const [showExcelPreview, setShowExcelPreview] = React.useState(false);
+  const [selectedPdfPreview, setSelectedPdfPreview] = React.useState<{ name: string; data: string } | null>(null);
 
   // Form Fields
   const [projectId, setProjectId] = React.useState(selectedProjectId && selectedProjectId !== "all" ? selectedProjectId : (projects[0]?.id || ""));
@@ -474,8 +477,18 @@ export default function PetyCashRequestManager({
   React.useEffect(() => {
     if (!isManualRequestNo && !editingRequestId) {
       const existingRequests = transactions.filter((t) => t.type === "PetyCashRequest");
-      const nextNum = existingRequests.length + 1;
-      setRequestNo(`REQ-PC-${String(nextNum).padStart(3, "0")}`);
+      let maxNum = 0;
+      existingRequests.forEach((t) => {
+        if (t.petyCashNo) {
+          const match = t.petyCashNo.match(/(?:PC|REQ-PC)-(\d+)/i) || t.petyCashNo.match(/^(\d+)$/);
+          if (match) {
+            const num = parseInt(match[1], 10);
+            if (num > maxNum) maxNum = num;
+          }
+        }
+      });
+      const nextNum = maxNum + 1;
+      setRequestNo(`PC-${String(nextNum).padStart(3, "0")}`);
     }
   }, [transactions, isManualRequestNo, editingRequestId]);
 
@@ -713,7 +726,17 @@ export default function PetyCashRequestManager({
 
     // Find maximum pety cash number to generate next one
     const petyCashTxs = transactions.filter((t) => t.type === "PetyCash" && t.petyCashNo);
-    const nextPetyCashNo = petyCashTxs.length + 1;
+    let maxNum = 0;
+    petyCashTxs.forEach((t) => {
+      if (t.petyCashNo) {
+        const match = t.petyCashNo.match(/(?:PC|REQ-PC)-(\d+)/i) || t.petyCashNo.match(/^(\d+)$/);
+        if (match) {
+          const num = parseInt(match[1], 10);
+          if (num > maxNum) maxNum = num;
+        }
+      }
+    });
+    const nextPetyCashNo = maxNum + 1;
     const generatedNo = `PC-${String(nextPetyCashNo).padStart(3, "0")}`;
 
     const newExpense: Transaction = {
@@ -756,10 +779,19 @@ export default function PetyCashRequestManager({
 
   const handleFileUpload = (file: File) => {
     if (!transferProofTx) return;
-    if (!file.type.startsWith("image/")) {
-      alert("Hanya file gambar (PNG, JPG, JPEG) yang diperbolehkan sebagai bukti transfer.");
+    const isImage = file.type.startsWith("image/");
+    const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+
+    if (!isImage && !isPdf) {
+      alert("Hanya file gambar (PNG, JPG, JPEG) atau dokumen PDF yang diperbolehkan sebagai bukti transfer.");
       return;
     }
+
+    if (file.size > 15 * 1024 * 1024) {
+      alert("Ukuran file maksimal adalah 15MB!");
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = () => {
       const base64 = reader.result as string;
@@ -776,7 +808,11 @@ export default function PetyCashRequestManager({
         })
       );
       setTransferProofTx((prev) => prev ? { ...prev, transferProof: base64 } : null);
-      setAlertMessage("Bukti transfer manual berhasil diunggah!");
+      setAlertMessage(
+        isPdf
+          ? "Dokumen PDF bukti transfer berhasil diunggah!"
+          : "Bukti transfer manual berhasil diunggah!"
+      );
     };
     reader.readAsDataURL(file);
   };
@@ -788,10 +824,11 @@ export default function PetyCashRequestManager({
     if (!proj) return null;
 
     const contractBase =
-      proj.contractValue.piping +
-      proj.contractValue.electrical +
-      proj.contractValue.mechanical +
-      proj.contractValue.scafolder;
+      (proj.contractValue?.piping || 0) +
+      (proj.contractValue?.electrical || 0) +
+      (proj.contractValue?.mechanical || 0) +
+      (proj.contractValue?.scafolder || 0) +
+      (proj.contractValue?.welder || 0);
 
     if (contractBase === 0) return null;
 
@@ -816,6 +853,12 @@ export default function PetyCashRequestManager({
   // List of requests
   const requestList = transactions.filter((t) => t.type === "PetyCashRequest");
 
+  const getPetyCashNumber = (petyCashNo: string | undefined): number => {
+    if (!petyCashNo) return 999999;
+    const match = petyCashNo.match(/(\d+)/);
+    return match ? parseInt(match[1], 10) : 999999;
+  };
+
   const filteredRequests = requestList.filter((req) => {
     // Project filter
     if (filterProject !== "all" && req.projectId !== filterProject) return false;
@@ -839,7 +882,7 @@ export default function PetyCashRequestManager({
     }
 
     return true;
-  });
+  }).sort((a, b) => getPetyCashNumber(a.petyCashNo) - getPetyCashNumber(b.petyCashNo));
 
   const totalRequestedSum = filteredRequests.reduce((sum, req) => sum + req.amount, 0);
 
@@ -952,7 +995,7 @@ export default function PetyCashRequestManager({
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
           className={`bg-white border-2 rounded-2xl shadow-lg overflow-hidden transition-all duration-300 ${
-            editingRequestId ? "border-amber-500/30 shadow-amber-500/5 animate-pulse-once" : "border-blue-500/20"
+            editingRequestId ? "border-amber-500/30 shadow-amber-500/5" : "border-blue-500/20"
           }`}
         >
           <div className={`p-4 border-b flex items-center justify-between transition-colors ${
@@ -1030,7 +1073,7 @@ export default function PetyCashRequestManager({
                 <input
                   type="text"
                   required
-                  placeholder="Contoh: REQ-PC-001..."
+                  placeholder="Contoh: PC-001..."
                   value={requestNo}
                   onChange={(e) => {
                     setRequestNo(e.target.value);
@@ -2506,31 +2549,99 @@ export default function PetyCashRequestManager({
                 </label>
 
                 {transferProofTx.transferProof ? (
-                  /* Custom uploaded transfer proof image */
-                  <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex flex-col items-center gap-3">
-                    <div className="relative border border-slate-100 rounded-lg overflow-hidden max-h-72 flex items-center justify-center bg-slate-100 w-full">
-                      <img
-                        src={transferProofTx.transferProof}
-                        alt="Bukti Transfer Lapangan"
-                        className="object-contain max-h-72 w-auto shadow-inner"
-                      />
-                    </div>
-                    <div className="flex justify-between items-center w-full">
-                      <span className="text-[10px] text-gray-400">Bukti manual terunggah</span>
-                      <button
-                        onClick={() => {
-                          setTransactions((prev) =>
-                            prev.map((t) => t.id === transferProofTx.id ? { ...t, transferProof: undefined } : t)
-                          );
-                          setTransferProofTx((prev) => prev ? { ...prev, transferProof: undefined } : null);
-                          setAlertMessage("Bukti transfer manual dihapus. Kembali ke resi elektronik.");
-                        }}
-                        className="text-[10px] font-bold text-red-600 hover:text-red-700 border border-red-100 hover:bg-red-50 px-2 py-0.5 rounded transition-all"
-                      >
-                        Hapus Bukti & Gunakan E-Receipt
-                      </button>
-                    </div>
-                  </div>
+                  (() => {
+                    const isPdf =
+                      transferProofTx.transferProof.startsWith("data:application/pdf") ||
+                      transferProofTx.transferProof.includes("pdf") ||
+                      transferProofTx.transferProof.startsWith("data:content/pdf");
+
+                    if (isPdf) {
+                      return (
+                        <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex flex-col items-center gap-3">
+                          <div className="flex items-center gap-3 p-3 bg-red-50 border border-red-200 rounded-xl w-full">
+                            <FileText className="w-8 h-8 text-red-600 shrink-0" />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-bold text-gray-800 truncate">
+                                Bukti_Transfer_{transferProofTx.petyCashNo}.pdf
+                              </p>
+                              <p className="text-[10px] text-gray-500">Dokumen PDF Terlampir</p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setSelectedPdfPreview({
+                                  name: `Bukti_Transfer_${transferProofTx.petyCashNo}.pdf`,
+                                  data: transferProofTx.transferProof!,
+                                })
+                              }
+                              className="bg-red-600 hover:bg-red-700 text-white text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 shadow-sm transition-all cursor-pointer shrink-0"
+                            >
+                              <ExternalLink className="w-3.5 h-3.5" /> Buka PDF
+                            </button>
+                          </div>
+
+                          {/* Embedded iframe/object preview */}
+                          <div className="w-full h-64 border border-slate-200 rounded-lg overflow-hidden bg-slate-100">
+                            <object
+                              data={getPdfBlobUrl(transferProofTx.transferProof)}
+                              type="application/pdf"
+                              className="w-full h-full"
+                            >
+                              <iframe
+                                src={getPdfBlobUrl(transferProofTx.transferProof)}
+                                className="w-full h-full border-0"
+                                title="Bukti Transfer PDF"
+                              />
+                            </object>
+                          </div>
+
+                          <div className="flex justify-between items-center w-full pt-1">
+                            <span className="text-[10px] text-gray-400">Dokumen PDF terunggah</span>
+                            <button
+                              onClick={() => {
+                                setTransactions((prev) =>
+                                  prev.map((t) => (t.id === transferProofTx.id ? { ...t, transferProof: undefined } : t))
+                                );
+                                setTransferProofTx((prev) => (prev ? { ...prev, transferProof: undefined } : null));
+                                setAlertMessage("Bukti transfer manual dihapus. Kembali ke resi elektronik.");
+                              }}
+                              className="text-[10px] font-bold text-red-600 hover:text-red-700 border border-red-100 hover:bg-red-50 px-2 py-0.5 rounded transition-all cursor-pointer"
+                            >
+                              Hapus Bukti & Gunakan E-Receipt
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      /* Custom uploaded transfer proof image */
+                      <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex flex-col items-center gap-3">
+                        <div className="relative border border-slate-100 rounded-lg overflow-hidden max-h-72 flex items-center justify-center bg-slate-100 w-full">
+                          <img
+                            src={transferProofTx.transferProof}
+                            alt="Bukti Transfer Lapangan"
+                            className="object-contain max-h-72 w-auto shadow-inner"
+                          />
+                        </div>
+                        <div className="flex justify-between items-center w-full">
+                          <span className="text-[10px] text-gray-400">Bukti manual terunggah</span>
+                          <button
+                            onClick={() => {
+                              setTransactions((prev) =>
+                                prev.map((t) => (t.id === transferProofTx.id ? { ...t, transferProof: undefined } : t))
+                              );
+                              setTransferProofTx((prev) => (prev ? { ...prev, transferProof: undefined } : null));
+                              setAlertMessage("Bukti transfer manual dihapus. Kembali ke resi elektronik.");
+                            }}
+                            className="text-[10px] font-bold text-red-600 hover:text-red-700 border border-red-100 hover:bg-red-50 px-2 py-0.5 rounded transition-all cursor-pointer"
+                          >
+                            Hapus Bukti & Gunakan E-Receipt
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })()
                 ) : (
                   /* High Fidelity Electronic Bank Receipt */
                   <div className="bg-gradient-to-br from-emerald-600 to-teal-700 text-white rounded-xl shadow-lg border border-emerald-500 overflow-hidden relative">
@@ -2606,7 +2717,7 @@ export default function PetyCashRequestManager({
               {!isReadOnly && (
                 <div className="space-y-2">
                   <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block">
-                    Unggah Bukti Transfer Baru (Gambar)
+                    Unggah Bukti Transfer Baru (Gambar / PDF)
                   </label>
                   
                   <div
@@ -2635,7 +2746,7 @@ export default function PetyCashRequestManager({
                     <input
                       id="proof-file-input"
                       type="file"
-                      accept="image/*"
+                      accept="image/*,application/pdf,.pdf"
                       className="hidden"
                       onChange={(e) => {
                         if (e.target.files && e.target.files[0]) {
@@ -2646,10 +2757,10 @@ export default function PetyCashRequestManager({
                     <Upload className="w-8 h-8 text-blue-500" />
                     <div className="space-y-1">
                       <p className="text-xs font-bold text-slate-700">
-                        Klik untuk memilih gambar atau seret file ke sini
+                        Klik untuk memilih gambar / PDF atau seret file ke sini
                       </p>
                       <p className="text-[10px] text-gray-400">
-                        Mendukung file gambar PNG, JPG, atau JPEG (Maks. 5MB)
+                        Mendukung file gambar (PNG, JPG, JPEG) dan dokumen PDF (Maks. 15MB)
                       </p>
                     </div>
                   </div>
@@ -2686,6 +2797,9 @@ export default function PetyCashRequestManager({
           </button>
         </div>
       )}
+
+      {/* PDF DOCUMENT PREVIEW MODAL */}
+      <PdfViewerModal pdfData={selectedPdfPreview} onClose={() => setSelectedPdfPreview(null)} />
     </div>
   );
 }

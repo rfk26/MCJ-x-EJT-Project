@@ -38,8 +38,11 @@ export default function ClosedRecap({ projects, transactions, onSelectProject }:
           (proj.contractValue?.mechanical || 0) +
           (proj.contractValue?.scafolder || 0);
 
-      const ppn = contract * (proj.ppnPercent / 100);
-      const pph = contract * (proj.pphPercent / 100);
+      const isHoOrEjt = proj.name.toUpperCase().includes("HO") || (proj.code && proj.code.toUpperCase().includes("HO")) || proj.name.toUpperCase().includes("EJT");
+      const ppnRate = isHoOrEjt ? ((proj.ppnPercent === 11 || proj.ppnPercent === undefined) ? 0 : proj.ppnPercent) : (proj.ppnPercent !== undefined ? proj.ppnPercent : 11);
+      const pphRate = isHoOrEjt ? ((proj.pphPercent === 4 || proj.pphPercent === undefined) ? 0 : proj.pphPercent) : (proj.pphPercent !== undefined ? proj.pphPercent : 4);
+      const ppn = contract * (ppnRate / 100);
+      const pph = contract * (pphRate / 100);
       const netValue = contract + ppn - pph;
 
       // Expenses from PetyCash only (excluding PO)
@@ -104,7 +107,7 @@ export default function ClosedRecap({ projects, transactions, onSelectProject }:
           <div className="flex items-baseline justify-between mt-2">
             <span className="text-lg font-bold text-gray-900">{formatIDR(aggregated.netValueTotal)}</span>
           </div>
-          <span className="text-[11px] text-gray-500 mt-3">Sudah termasuk Ppn 11% - Pph 4%</span>
+          <span className="text-[11px] text-gray-500 mt-3">Akumulasi sesuai Ppn &amp; Pph tiap proyek</span>
         </div>
 
         <div className="bg-white p-5 border border-gray-200 rounded-2xl shadow-sm flex flex-col justify-between">
@@ -145,8 +148,11 @@ export default function ClosedRecap({ projects, transactions, onSelectProject }:
                 (proj.contractValue?.mechanical || 0) +
                 (proj.contractValue?.scafolder || 0);
 
-            const ppn = contract * (proj.ppnPercent / 100);
-            const pph = contract * (proj.pphPercent / 100);
+            const isHoOrEjt = proj.name.toUpperCase().includes("HO") || (proj.code && proj.code.toUpperCase().includes("HO")) || proj.name.toUpperCase().includes("EJT");
+            const ppnRate = isHoOrEjt ? ((proj.ppnPercent === 11 || proj.ppnPercent === undefined) ? 0 : proj.ppnPercent) : (proj.ppnPercent !== undefined ? proj.ppnPercent : 11);
+            const pphRate = isHoOrEjt ? ((proj.pphPercent === 4 || proj.pphPercent === undefined) ? 0 : proj.pphPercent) : (proj.pphPercent !== undefined ? proj.pphPercent : 4);
+            const ppn = contract * (ppnRate / 100);
+            const pph = contract * (pphRate / 100);
             const netValue = contract + ppn - pph;
 
             const expenses = transactions

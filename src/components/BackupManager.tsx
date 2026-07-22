@@ -1,5 +1,5 @@
 import React from "react";
-import { Project, Transaction } from "../types";
+import { Project, Transaction, ActivityLog, ProjectStatus } from "../types";
 import { 
   Database, 
   Download, 
@@ -18,6 +18,10 @@ interface BackupManagerProps {
   setProjects: React.Dispatch<React.SetStateAction<Project[]>>;
   transactions: Transaction[];
   setTransactions: React.Dispatch<React.SetStateAction<Transaction[]>>;
+  activities?: ActivityLog[];
+  setActivities?: React.Dispatch<React.SetStateAction<ActivityLog[]>>;
+  categories?: string[];
+  setCategories?: React.Dispatch<React.SetStateAction<string[]>>;
   setAppToast: (toast: { message: string; type: "success" | "info" } | null) => void;
 }
 
@@ -28,6 +32,8 @@ interface LocalBackup {
   transactionCount: number;
   projects: Project[];
   transactions: Transaction[];
+  activities?: ActivityLog[];
+  categories?: string[];
 }
 
 export default function BackupManager({
@@ -35,6 +41,10 @@ export default function BackupManager({
   setProjects,
   transactions,
   setTransactions,
+  activities = [],
+  setActivities,
+  categories = [],
+  setCategories,
   setAppToast,
 }: BackupManagerProps) {
   const [autoBackups, setAutoBackups] = React.useState<LocalBackup[]>([]);
@@ -60,12 +70,10 @@ export default function BackupManager({
     }
   }, []);
 
-  // AUTO-BACKUP TRIGER: Automatically run a silent backup in localStorage on modifications
-  // We debounce/throttle it slightly or trigger when projects/transactions change and are not empty
+  // AUTO-BACKUP TRIGGER: Automatically run a silent backup in localStorage on modifications
   React.useEffect(() => {
     if (projects.length === 0 && transactions.length === 0) return;
 
-    // Check if the current state is already backed up to avoid redundant infinite loops
     const saved = localStorage.getItem("mcj_auto_backups_history");
     let currentHistory: LocalBackup[] = [];
     if (saved) {
@@ -87,11 +95,10 @@ export default function BackupManager({
         JSON.stringify(latest.transactions) === JSON.stringify(transactions);
       
       if (isIdentical) {
-        return; // Skip duplicating the same backup
+        return; // Skip duplicating
       }
     }
 
-    // Create a new automatic backup snapshot
     const timestampStr = new Date().toLocaleString("id-ID", {
       year: "numeric",
       month: "long",
@@ -108,14 +115,15 @@ export default function BackupManager({
       transactionCount: transactions.length,
       projects: JSON.parse(JSON.stringify(projects)),
       transactions: JSON.parse(JSON.stringify(transactions)),
+      activities: JSON.parse(JSON.stringify(activities)),
+      categories: JSON.parse(JSON.stringify(categories)),
     };
 
-    // Keep rolling history of maximum 5 backups
     const updatedHistory = [newBackup, ...currentHistory].slice(0, 5);
     localStorage.setItem("mcj_auto_backups_history", JSON.stringify(updatedHistory));
     setAutoBackups(updatedHistory);
     setLastAutoBackupTime(timestampStr);
-  }, [projects, transactions]);
+  }, [projects, transactions, activities, categories]);
 
   // Download complete dataset as JSON file
   const handleDownloadBackup = () => {
@@ -126,6 +134,8 @@ export default function BackupManager({
       dataset: {
         projects,
         transactions,
+        activities,
+        categories,
       },
     };
 
@@ -149,38 +159,142 @@ export default function BackupManager({
     });
   };
 
-  // Helper function to validate and restore backup data object
+  // Helper function to validate, sanitize, and restore backup data object
   const validateAndRestore = (data: any): boolean => {
     if (!data || typeof data !== "object") return false;
 
-    // Support both standard envelope structure and direct data array structures
-    let targetProjects: any = null;
-    let targetTransactions: any = null;
+    let targetProjects: any[] = [];
+    let targetTransactions: any[] = [];
+    let targetActivities: any[] = [];
+    let targetCategories: any[] = [];
 
-    if (data.dataset && Array.isArray(data.dataset.projects) && Array.isArray(data.dataset.transactions)) {
-      targetProjects = data.dataset.projects;
-      targetTransactions = data.dataset.transactions;
-    } else if (Array.isArray(data.projects) && Array.isArray(data.transactions)) {
-      targetProjects = data.projects;
-      targetTransactions = data.transactions;
+    // Extract dataset arrays from standard envelope or direct object root
+    if (data.dataset && typeof data.dataset === "object") {
+      if (Array.isArray(data.dataset.projects)) targetProjects = data.dataset.projects;
+      if (Array.isArray(data.dataset.transactions)) targetTransactions = data.dataset.transactions;
+      if (Array.isArray(data.dataset.activities)) targetActivities = data.dataset.activities;
+      if (Array.isArray(data.dataset.categories)) targetCategories = data.dataset.categories;
+    } else {
+      if (Array.isArray(data.projects)) targetProjects = data.projects;
+      if (Array.isArray(data.transactions)) targetTransactions = data.transactions;
+      if (Array.isArray(data.activities)) targetActivities = data.activities;
+      if (Array.isArray(data.categories)) targetCategories = data.categories;
     }
 
-    if (!targetProjects || !targetTransactions) {
+    if (!Array.isArray(targetProjects) || !Array.isArray(targetTransactions)) {
       return false;
     }
 
-    // Basic structural checks
-    const isValidProjects = targetProjects.every((p: any) => p && typeof p.id === "string" && typeof p.name === "string");
-    const isValidTransactions = targetTransactions.every((t: any) => t && typeof t.id === "string" && typeof t.amount === "number");
+    // Sanitize and normalize every project object to guarantee safe properties
+    const sanitizedProjects: Project[] = targetProjects.map((p: any, idx: number) => {
+      if (!p || typeof p !== "object") {
+        return {
+          id: `proj-${Date.now()}-${idx}`,
+          name: `Proyek Restored ${idx + 1}`,
+          code: `PRJ-${idx + 1}`,
+          manager: "Admin",
+          pic: "Admin",
+          status: ProjectStatus.PROGRES,
+          startDate: new Date().toISOString().split("T")[0],
+          expectedProfitPercent: 35,
+          contractValue: { piping: 0, electrical: 0, mechanical: 0, scafolder: 0, welder: 0 },
+          ppnPercent: 11,
+          pphPercent: 4,
+          budgetThresholdPercent: 85,
+        };
+      }
 
-    if (!isValidProjects || !isValidTransactions) {
+      return {
+        id: String(p.id || `proj-${Date.now()}-${idx}`),
+        name: String(p.name || `Proyek Restored ${idx + 1}`),
+        code: String(p.code || p.name || `PRJ-${idx + 1}`),
+        manager: String(p.manager || "Admin"),
+        pic: String(p.pic || p.manager || "Admin"),
+        status: p.status || ProjectStatus.PROGRES,
+        startDate: p.startDate || new Date().toISOString().split("T")[0],
+        expectedProfitPercent: Number(p.expectedProfitPercent) || 35,
+        contractValue: {
+          piping: Number(p.contractValue?.piping) || 0,
+          electrical: Number(p.contractValue?.electrical) || 0,
+          mechanical: Number(p.contractValue?.mechanical) || 0,
+          scafolder: Number(p.contractValue?.scafolder) || 0,
+          welder: Number(p.contractValue?.welder) || 0,
+        },
+        ppnPercent: Number(p.ppnPercent) || 11,
+        pphPercent: Number(p.pphPercent) || 4,
+        budgetThresholdPercent: Number(p.budgetThresholdPercent) || 85,
+        notes: p.notes || "",
+        contractNames: p.contractNames || {},
+        company: p.company || "",
+        poNo: p.poNo || "",
+        customContractItems: Array.isArray(p.customContractItems) ? p.customContractItems : [],
+        targetCompletionDate: p.targetCompletionDate || "",
+      };
+    });
+
+    // Sanitize and normalize every transaction object
+    const sanitizedTransactions: Transaction[] = targetTransactions.map((t: any, idx: number) => {
+      if (!t || typeof t !== "object") {
+        return {
+          id: `tx-${Date.now()}-${idx}`,
+          projectId: sanitizedProjects[0]?.id || "unknown",
+          type: "PetyCash",
+          pic: "Admin",
+          date: new Date().toISOString().split("T")[0],
+          amount: 0,
+          status: "Selesai",
+          description: "Transaksi restored",
+          category: "Lain - Lain",
+        };
+      }
+
+      return {
+        id: String(t.id || `tx-${Date.now()}-${idx}`),
+        projectId: String(t.projectId || sanitizedProjects[0]?.id || ""),
+        type: t.type || "PetyCash",
+        pic: String(t.pic || "Admin"),
+        date: t.date || new Date().toISOString().split("T")[0],
+        amount: Number(t.amount) || 0,
+        status: t.status || "Selesai",
+        description: t.description || "",
+        invoiceNo: t.invoiceNo || "",
+        petyCashNo: t.petyCashNo || "",
+        poNo: t.poNo || "",
+        supplier: t.supplier || "",
+        paymentMethod: t.paymentMethod || "",
+        category: t.category || "Lain - Lain",
+        items: Array.isArray(t.items) ? t.items : [],
+        contractItems: Array.isArray(t.contractItems) ? t.contractItems : [],
+        company: t.company || "",
+        requestId: t.requestId || "",
+        transferProof: t.transferProof || "",
+      };
+    });
+
+    try {
+      localStorage.setItem("mcj_projects", JSON.stringify(sanitizedProjects));
+      localStorage.setItem("mcj_transactions", JSON.stringify(sanitizedTransactions));
+      if (targetActivities.length > 0) {
+        localStorage.setItem("mcj_activities", JSON.stringify(targetActivities));
+      }
+      if (targetCategories.length > 0) {
+        localStorage.setItem("mcj_categories", JSON.stringify(targetCategories));
+      }
+
+      setProjects(sanitizedProjects);
+      setTransactions(sanitizedTransactions);
+
+      if (setActivities && targetActivities.length > 0) {
+        setActivities(targetActivities);
+      }
+      if (setCategories && targetCategories.length > 0) {
+        setCategories(targetCategories);
+      }
+      return true;
+    } catch (err) {
+      console.error("Error setting restored state:", err);
       return false;
     }
-
-    // Restore state
-    setProjects(targetProjects);
-    setTransactions(targetTransactions);
-    return true;
   };
 
   // Handle File Upload Restore
@@ -202,7 +316,7 @@ export default function BackupManager({
             type: "success",
           });
         } else {
-          alert("Gagal memulihkan: Format file JSON tidak valid atau struktur data rusak.");
+          alert("Gagal memulihkan: Format file JSON tidak valid atau struktur data tidak sesuai.");
         }
       } catch (err) {
         alert("Gagal membaca file: File tidak berupa JSON yang valid.");
@@ -236,12 +350,21 @@ export default function BackupManager({
   // Restore state from rolling browser snapshot history
   const handleRestoreFromLocal = (backup: LocalBackup) => {
     if (window.confirm(`Apakah Anda yakin ingin memulihkan data ke kondisi tanggal ${backup.timestamp}? Data saat ini akan digantikan.`)) {
-      setProjects(backup.projects);
-      setTransactions(backup.transactions);
-      setAppToast({
-        message: `Berhasil memulihkan data ke snapshot ${backup.timestamp}`,
-        type: "success",
+      const success = validateAndRestore({
+        projects: backup.projects,
+        transactions: backup.transactions,
+        activities: backup.activities,
+        categories: backup.categories,
       });
+
+      if (success) {
+        setAppToast({
+          message: `Berhasil memulihkan data ke snapshot ${backup.timestamp}`,
+          type: "success",
+        });
+      } else {
+        alert("Gagal memulihkan snapshot lokal.");
+      }
     }
   };
 

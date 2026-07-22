@@ -4,8 +4,8 @@
  */
 
 import React from "react";
-import { Project, ProjectStatus, ContractBreakdown, Transaction, ContractItem } from "../types";
-import { Plus, Briefcase, FileDigit, ShieldCheck, Percent, HelpCircle, Edit2, CheckCircle2, XCircle, AlertTriangle, Trash2, Search, X } from "lucide-react";
+import { Project, ProjectStatus, ContractBreakdown, Transaction, ContractItem, ActivityLog } from "../types";
+import { Plus, Briefcase, FileDigit, ShieldCheck, Percent, HelpCircle, Edit2, CheckCircle2, XCircle, AlertTriangle, Trash2, Search, X, Calendar, Clock, History, Activity, FileText, Receipt, ChevronDown, ChevronUp, Package, DollarSign, UserCheck } from "lucide-react";
 import { motion } from "motion/react";
 
 interface ProjectManagerProps {
@@ -13,6 +13,7 @@ interface ProjectManagerProps {
   setProjects: React.Dispatch<React.SetStateAction<Project[]>>;
   transactions: Transaction[];
   setTransactions?: React.Dispatch<React.SetStateAction<Transaction[]>>;
+  activities?: ActivityLog[];
   isReadOnly?: boolean;
   onAddActivity?: (
     type: "project" | "po" | "petycash_request" | "petycash_expense" | "invoice",
@@ -23,9 +24,18 @@ interface ProjectManagerProps {
   ) => void;
 }
 
-export default function ProjectManager({ projects, setProjects, transactions, setTransactions, onAddActivity, isReadOnly = false }: ProjectManagerProps) {
+export default function ProjectManager({
+  projects,
+  setProjects,
+  transactions,
+  setTransactions,
+  activities = [],
+  onAddActivity,
+  isReadOnly = false,
+}: ProjectManagerProps) {
   const [showAddForm, setShowAddForm] = React.useState(false);
   const [searchQuery, setSearchQuery] = React.useState("");
+  const [expandedLogProjectId, setExpandedLogProjectId] = React.useState<string | null>(null);
 
   // Memoized filtered projects list based on name or registration code
   const filteredProjects = React.useMemo(() => {
@@ -40,13 +50,34 @@ export default function ProjectManager({ projects, setProjects, transactions, se
     });
   }, [projects, searchQuery]);
 
-  // Form Fields
+  // Memoized list of projects near or past target completion date (< 7 days)
+  const urgentProjects = React.useMemo(() => {
+    const todayMs = new Date(new Date().toISOString().split("T")[0]).getTime();
+    return projects.filter((p) => {
+      if (p.status !== ProjectStatus.PROGRES || !p.targetCompletionDate) return false;
+      const targetMs = new Date(p.targetCompletionDate).getTime();
+      const daysLeft = Math.ceil((targetMs - todayMs) / (1000 * 60 * 60 * 24));
+      return daysLeft <= 7;
+    });
+  }, [projects]);
   const [name, setName] = React.useState("");
   const [code, setCode] = React.useState("");
   const [manager, setManager] = React.useState("");
   const [pic, setPic] = React.useState("");
+  const [targetCompletionDate, setTargetCompletionDate] = React.useState("");
   const [expectedProfitPercent, setExpectedProfitPercent] = React.useState(35);
   const [budgetThresholdPercent, setBudgetThresholdPercent] = React.useState(85);
+  const [ppnPercent, setPpnPercent] = React.useState<number>(11);
+  const [pphPercent, setPphPercent] = React.useState<number>(4);
+
+  // Auto-detect HO / EJT to suggest 0% for PPN & PPh
+  React.useEffect(() => {
+    const isHoOrEjt = name.toUpperCase().includes("HO") || code.toUpperCase().includes("HO") || name.toUpperCase().includes("EJT");
+    if (isHoOrEjt) {
+      setPpnPercent(0);
+      setPphPercent(0);
+    }
+  }, [name, code]);
 
   const [company, setCompany] = React.useState("CV. Mandiri Cipta Jaya");
   const [customCompany, setCustomCompany] = React.useState("");
@@ -152,6 +183,7 @@ export default function ProjectManager({ projects, setProjects, transactions, se
   const [editCode, setEditCode] = React.useState("");
   const [editManager, setEditManager] = React.useState("");
   const [editPic, setEditPic] = React.useState("");
+  const [editTargetCompletionDate, setEditTargetCompletionDate] = React.useState("");
   const [editExpectedProfitPercent, setEditExpectedProfitPercent] = React.useState(35);
   const [editBudgetThresholdPercent, setEditBudgetThresholdPercent] = React.useState(85);
   const [editCompany, setEditCompany] = React.useState("CV. Mandiri Cipta Jaya");
@@ -204,6 +236,110 @@ export default function ProjectManager({ projects, setProjects, transactions, se
     }).format(val);
   };
 
+  const getProjectHistoryLogs = React.useCallback(
+    (proj: Project) => {
+      const logs: {
+        id: string;
+        type: "project" | "po" | "petycash_request" | "petycash_expense" | "invoice" | "milestone";
+        action: string;
+        description: string;
+        pic: string;
+        date: string;
+      }[] = [];
+
+      // 1. Activity logs explicitly for this project or referencing project name/code
+      if (activities && activities.length > 0) {
+        activities.forEach((act) => {
+          const isForProj =
+            act.projectId === proj.id ||
+            (act.description &&
+              (act.description.toLowerCase().includes(proj.name.toLowerCase()) ||
+                act.description.toLowerCase().includes(proj.code.toLowerCase())));
+          if (isForProj) {
+            logs.push({
+              id: act.id,
+              type: act.type || "project",
+              action: act.action || "Aktivitas Proyek",
+              description: act.description,
+              pic: act.pic || proj.manager || "Admin",
+              date: act.date || new Date().toISOString().split("T")[0],
+            });
+          }
+        });
+      }
+
+      // 2. Transactions for this project
+      const projTx = transactions.filter((t) => t.projectId === proj.id);
+      projTx.forEach((t) => {
+        const isVoucher = t.type === "PetyCash";
+        let action = "Transaksi Kas Kecil";
+        if (t.type === "PetyCash") action = "Realisasi Voucher Kas Kecil";
+        else if (t.type === "PetyCashRequest") action = "Pengajuan Kas Kecil";
+        else if (t.type === "Invoice") action = `Invoice #${t.invoiceNo || ""}`;
+        else if (t.type === "PO") action = `Purchase Order #${t.poNo || ""}`;
+
+        logs.push({
+          id: `tx-${t.id}`,
+          type: isVoucher ? "petycash_expense" : t.type === "PetyCashRequest" ? "petycash_request" : t.type === "Invoice" ? "invoice" : "po",
+          action,
+          description: `${t.description || "Transaksi"} - ${formatIDR(t.amount)} (${t.status || "Selesai"})`,
+          pic: t.pic || proj.manager || "Admin",
+          date: t.date || new Date().toISOString().split("T")[0],
+        });
+      });
+
+      // 5. Default milestones if needed
+      if (proj.targetCompletionDate) {
+        logs.push({
+          id: `m-target-${proj.id}`,
+          type: "milestone",
+          action: "Target Penyelesaian Set",
+          description: `Target penyelesaian proyek ditetapkan ke ${proj.targetCompletionDate}`,
+          pic: proj.manager,
+          date: proj.targetCompletionDate,
+        });
+      }
+
+      if (proj.startDate) {
+        const contractBase = proj.customContractItems && proj.customContractItems.length > 0
+          ? proj.customContractItems.reduce((s, item) => s + Number(item.value || 0), 0)
+          : (proj.contractValue?.piping || 0) +
+            (proj.contractValue?.electrical || 0) +
+            (proj.contractValue?.mechanical || 0) +
+            (proj.contractValue?.scafolder || 0) +
+            (proj.contractValue?.welder || 0);
+
+        logs.push({
+          id: `m-start-${proj.id}`,
+          type: "project",
+          action: "Inisialisasi Proyek",
+          description: `Pendaftaran proyek "${proj.name}" dengan nilai kontrak ${formatIDR(contractBase)}`,
+          pic: proj.manager,
+          date: proj.startDate,
+        });
+      }
+
+      // Deduplicate logs by unique action + description + date
+      const uniqueLogs: typeof logs = [];
+      const seen = new Set<string>();
+
+      logs.forEach((item) => {
+        const key = `${item.date}-${item.action}-${item.description}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          uniqueLogs.push(item);
+        }
+      });
+
+      // Sort descending by date
+      uniqueLogs.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+      // Return top 5 most recent entries
+      return uniqueLogs.slice(0, 5);
+    },
+    [activities, transactions]
+  );
+
   const handleCreateProject = (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -240,11 +376,12 @@ export default function ProjectManager({ projects, setProjects, transactions, se
         scafolder: "Scafolder",
         welder: "Welder",
       },
-      ppnPercent: 11,
-      pphPercent: 4,
+      ppnPercent: Number(ppnPercent),
+      pphPercent: Number(pphPercent),
       budgetThresholdPercent: Number(budgetThresholdPercent),
       notes,
       company: updatedCompany,
+      targetCompletionDate: targetCompletionDate || undefined,
       customContractItems: [
         { id: "piping", name: "Piping", value: 0 },
         { id: "electrical", name: "Electrical", value: 0 },
@@ -270,8 +407,11 @@ export default function ProjectManager({ projects, setProjects, transactions, se
     setCode("");
     setManager("");
     setPic("");
+    setTargetCompletionDate("");
     setExpectedProfitPercent(35);
     setBudgetThresholdPercent(85);
+    setPpnPercent(11);
+    setPphPercent(4);
     setCompany("CV. Mandiri Cipta Jaya");
     setCustomCompany("");
     setNotes("");
@@ -336,6 +476,7 @@ export default function ProjectManager({ projects, setProjects, transactions, se
     setEditCode(proj.code);
     setEditManager(proj.manager);
     setEditPic(proj.pic || proj.manager);
+    setEditTargetCompletionDate(proj.targetCompletionDate || "");
     setEditExpectedProfitPercent(proj.expectedProfitPercent);
     setEditBudgetThresholdPercent(proj.budgetThresholdPercent);
     
@@ -351,10 +492,11 @@ export default function ProjectManager({ projects, setProjects, transactions, se
       setEditCustomCompany("");
     }
 
+    const isHoOrEjt = proj.name.toUpperCase().includes("HO") || (proj.code && proj.code.toUpperCase().includes("HO")) || proj.name.toUpperCase().includes("EJT");
     setEditNotes(proj.notes || "");
     setEditPoNo(proj.poNo || "");
-    setEditPpnPercent(proj.ppnPercent ?? 11);
-    setEditPphPercent(proj.pphPercent ?? 4);
+    setEditPpnPercent(isHoOrEjt ? ((proj.ppnPercent === 11 || proj.ppnPercent === undefined) ? 0 : proj.ppnPercent) : (proj.ppnPercent !== undefined ? proj.ppnPercent : 11));
+    setEditPphPercent(isHoOrEjt ? ((proj.pphPercent === 4 || proj.pphPercent === undefined) ? 0 : proj.pphPercent) : (proj.pphPercent !== undefined ? proj.pphPercent : 4));
     
     if (proj.customContractItems && proj.customContractItems.length > 0) {
       setEditCustomContractItems(JSON.parse(JSON.stringify(proj.customContractItems)));
@@ -399,6 +541,7 @@ export default function ProjectManager({ projects, setProjects, transactions, se
       expectedProfitPercent: Number(editExpectedProfitPercent),
       budgetThresholdPercent: Number(editBudgetThresholdPercent),
       company: updatedCompany,
+      targetCompletionDate: editTargetCompletionDate || undefined,
       notes: editNotes || undefined,
       poNo: editPoNo || undefined,
       ppnPercent: Number(editPpnPercent),
@@ -445,6 +588,16 @@ export default function ProjectManager({ projects, setProjects, transactions, se
           }
           return t;
         })
+      );
+    }
+
+    if (onAddActivity) {
+      onAddActivity(
+        "project",
+        "Pembaruan Data Proyek",
+        `Pembaruan data/anggaran proyek "${editName}" (Manager: ${editManager}, Alarm: ${editBudgetThresholdPercent}%)`,
+        "Administrator",
+        editingProject.id
       );
     }
 
@@ -497,7 +650,7 @@ export default function ProjectManager({ projects, setProjects, transactions, se
             )}
 
             {/* Primary Details Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold text-gray-700">Nama Proyek</label>
                 <input
@@ -546,6 +699,18 @@ export default function ProjectManager({ projects, setProjects, transactions, se
               </div>
 
               <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-gray-700 flex items-center gap-1">
+                  <Calendar className="w-3.5 h-3.5 text-blue-600" /> Target Selesai
+                </label>
+                <input
+                  type="date"
+                  value={targetCompletionDate}
+                  onChange={(e) => setTargetCompletionDate(e.target.value)}
+                  className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs focus:ring-1 focus:ring-blue-600 focus:bg-white"
+                />
+              </div>
+
+              <div className="space-y-1.5">
                 <label className="text-xs font-semibold text-gray-700">Perusahaan</label>
                 <select
                   value={company}
@@ -569,8 +734,36 @@ export default function ProjectManager({ projects, setProjects, transactions, se
               </div>
             </div>
 
-            {/* Threshold & Profit Configuration */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t border-gray-100">
+            {/* Tax, Threshold & Profit Configuration */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 pt-4 border-t border-gray-100">
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-gray-700 flex items-center gap-1">
+                  PPN (%)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={ppnPercent}
+                  onChange={(e) => setPpnPercent(Number(e.target.value))}
+                  className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs focus:ring-1 focus:ring-blue-600 focus:bg-white text-emerald-700 font-bold"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-gray-700 flex items-center gap-1">
+                  PPh (%)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={pphPercent}
+                  onChange={(e) => setPphPercent(Number(e.target.value))}
+                  className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs focus:ring-1 focus:ring-blue-600 focus:bg-white text-red-700 font-bold"
+                />
+              </div>
+
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold text-gray-700 flex items-center gap-1">
                   Persentase Target Profit (%) <Percent className="w-3.5 h-3.5 text-gray-400" />
@@ -671,6 +864,31 @@ export default function ProjectManager({ projects, setProjects, transactions, se
           </div>
         </div>
 
+        {/* Urgent Projects Warning Banner (< 7 Days or Overdue) */}
+        {urgentProjects.length > 0 && (
+          <div className="mx-6 my-4 bg-gradient-to-r from-amber-50 to-orange-50 border-2 border-amber-300 rounded-2xl p-4 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in duration-300">
+            <div className="flex items-start gap-3">
+              <div className="p-2.5 bg-amber-500/20 text-amber-800 rounded-xl shrink-0 mt-0.5">
+                <AlertTriangle className="w-5 h-5 text-amber-600" />
+              </div>
+              <div>
+                <h4 className="font-extrabold text-xs text-amber-950 flex items-center gap-2">
+                  <span>⚠️ Peringatan Target Penyelesaian Proyek (&lt; 7 Hari)</span>
+                  <span className="bg-amber-600 text-white text-[10px] px-2 py-0.5 rounded-full font-extrabold font-mono">
+                    {urgentProjects.length} Proyek
+                  </span>
+                </h4>
+                <p className="text-[11px] text-amber-800 mt-1 leading-relaxed">
+                  Proyek berikut mendekati atau melewati tenggat tanggal penyelesaian:{" "}
+                  <strong className="text-amber-950 font-bold">
+                    {urgentProjects.map((p) => `${p.name} (${p.targetCompletionDate})`).join(", ")}
+                  </strong>
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse text-xs">
             <thead>
@@ -688,6 +906,16 @@ export default function ProjectManager({ projects, setProjects, transactions, se
             </thead>
             <tbody className="divide-y divide-gray-100 font-sans">
               {filteredProjects.map((proj) => {
+                // Compute target date deadline status
+                const todayStr = new Date().toISOString().split("T")[0];
+                const todayMs = new Date(todayStr).getTime();
+                let deadlineDaysLeft: number | null = null;
+
+                if (proj.targetCompletionDate) {
+                  const targetMs = new Date(proj.targetCompletionDate).getTime();
+                  deadlineDaysLeft = Math.ceil((targetMs - todayMs) / (1000 * 60 * 60 * 24));
+                }
+
                 // Compute total spending (only Petty Cash actual expenditures)
                 const totalSpending = transactions
                   .filter((t) => t.projectId === proj.id && t.type === "PetyCash")
@@ -714,15 +942,19 @@ export default function ProjectManager({ projects, setProjects, transactions, se
                 const isOverBudget = totalSpending >= contractBase;
                 const isNearingThreshold = spendRatio >= proj.budgetThresholdPercent;
 
-                const ppnRate = proj.ppnPercent !== undefined ? proj.ppnPercent : 11;
-                const pphRate = proj.pphPercent !== undefined ? proj.pphPercent : 4;
+                const isHoOrEjt = proj.name.toUpperCase().includes("HO") || (proj.code && proj.code.toUpperCase().includes("HO")) || proj.name.toUpperCase().includes("EJT");
+                const ppnRate = isHoOrEjt ? ((proj.ppnPercent === 11 || proj.ppnPercent === undefined) ? 0 : proj.ppnPercent) : (proj.ppnPercent !== undefined ? proj.ppnPercent : 11);
+                const pphRate = isHoOrEjt ? ((proj.pphPercent === 4 || proj.pphPercent === undefined) ? 0 : proj.pphPercent) : (proj.pphPercent !== undefined ? proj.pphPercent : 4);
                 const netValue = contractBase + (contractBase * (ppnRate / 100)) - (contractBase * (pphRate / 100));
                 const profit = netValue - totalSpending;
                 const profitMargin = netValue > 0 ? (profit / netValue) * 100 : 0;
                 const targetMargin = proj.expectedProfitPercent || 35;
 
+                const projLogs = getProjectHistoryLogs(proj);
+
                 return (
-                  <tr key={proj.id} className="hover:bg-slate-50/50">
+                  <React.Fragment key={proj.id}>
+                    <tr className="hover:bg-slate-50/50">
                     {/* Code & Name */}
                     <td className="p-4 space-y-1 max-w-[240px]">
                       <div className="flex items-center gap-1.5">
@@ -747,6 +979,54 @@ export default function ProjectManager({ projects, setProjects, transactions, se
                         </div>
                       )}
                       {proj.notes && <p className="text-[10px] text-gray-400 line-clamp-1 italic">{proj.notes}</p>}
+
+                      {/* Target Deadline Visual Warning Indicator */}
+                      {proj.targetCompletionDate && (
+                        <div className="mt-1.5 pt-1 border-t border-slate-100">
+                          {proj.status === ProjectStatus.PROGRES && deadlineDaysLeft !== null && deadlineDaysLeft <= 7 && deadlineDaysLeft >= 0 ? (
+                            <div
+                              title={`Target penyelesaian: ${proj.targetCompletionDate}`}
+                              className="flex items-center gap-1.5 bg-amber-500/15 border border-amber-500/40 text-amber-900 px-2 py-1 rounded-lg text-[10px] font-extrabold w-fit shadow-2xs"
+                            >
+                              <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                              <span>
+                                {deadlineDaysLeft === 0 ? "Target Hari Ini!" : `Mendekati Deadline (H-${deadlineDaysLeft})`}
+                              </span>
+                            </div>
+                          ) : proj.status === ProjectStatus.PROGRES && deadlineDaysLeft !== null && deadlineDaysLeft < 0 ? (
+                            <div
+                              title={`Target penyelesaian: ${proj.targetCompletionDate}`}
+                              className="flex items-center gap-1.5 bg-red-500/15 border border-red-500/40 text-red-900 px-2 py-1 rounded-lg text-[10px] font-extrabold w-fit shadow-2xs"
+                            >
+                              <XCircle className="w-3.5 h-3.5 text-red-600 shrink-0" />
+                              <span>Lewat Target ({Math.abs(deadlineDaysLeft)} hr)</span>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-1 text-[10px] text-slate-500 font-medium">
+                              <Calendar className="w-3 h-3 text-slate-400 shrink-0" />
+                              <span>
+                                Target: <strong className="font-mono text-slate-700">{proj.targetCompletionDate}</strong>
+                                {deadlineDaysLeft !== null && ` (H-${deadlineDaysLeft})`}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Log Riwayat Quick Toggle Button */}
+                      <button
+                        type="button"
+                        onClick={() => setExpandedLogProjectId(expandedLogProjectId === proj.id ? null : proj.id)}
+                        className={`mt-2.5 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-[10px] font-extrabold transition-all cursor-pointer border shadow-2xs ${
+                          expandedLogProjectId === proj.id
+                            ? "bg-blue-600 text-white border-blue-600 shadow-blue-200"
+                            : "bg-slate-100 text-slate-700 border-slate-200 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200"
+                        }`}
+                      >
+                        <History className="w-3 h-3" />
+                        <span>Log Riwayat ({getProjectHistoryLogs(proj).length})</span>
+                        {expandedLogProjectId === proj.id ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                      </button>
                     </td>
 
                     {/* Manager & PIC */}
@@ -771,36 +1051,36 @@ export default function ProjectManager({ projects, setProjects, transactions, se
                             ))
                         ) : (
                           <>
-                            {proj.contractValue?.piping > 0 && (
+                            {proj.contractValue?.piping ? (
                               <div className="flex justify-between gap-3 text-[9px]">
                                 <span className="text-gray-400">{proj.contractNames?.piping || "Piping"}:</span>
                                 <span className="font-mono font-medium">{formatIDR(proj.contractValue.piping)}</span>
                               </div>
-                            )}
-                            {proj.contractValue?.electrical > 0 && (
+                            ) : null}
+                            {proj.contractValue?.electrical ? (
                               <div className="flex justify-between gap-3 text-[9px]">
                                 <span className="text-gray-400">{proj.contractNames?.electrical || "Electrical"}:</span>
                                 <span className="font-mono font-medium">{formatIDR(proj.contractValue.electrical)}</span>
                               </div>
-                            )}
-                            {proj.contractValue?.mechanical > 0 && (
+                            ) : null}
+                            {proj.contractValue?.mechanical ? (
                               <div className="flex justify-between gap-3 text-[9px]">
                                 <span className="text-gray-400">{proj.contractNames?.mechanical || "Mechanical"}:</span>
                                 <span className="font-mono font-medium">{formatIDR(proj.contractValue.mechanical)}</span>
                               </div>
-                            )}
-                            {proj.contractValue?.scafolder > 0 && (
+                            ) : null}
+                            {proj.contractValue?.scafolder ? (
                               <div className="flex justify-between gap-3 text-[9px]">
                                 <span className="text-gray-400">{proj.contractNames?.scafolder || "Scafolder"}:</span>
                                 <span className="font-mono font-medium">{formatIDR(proj.contractValue.scafolder)}</span>
                               </div>
-                            )}
-                            {proj.contractValue?.welder > 0 && (
+                            ) : null}
+                            {proj.contractValue?.welder ? (
                               <div className="flex justify-between gap-3 text-[9px]">
                                 <span className="text-gray-400">{proj.contractNames?.welder || "Welder"}:</span>
                                 <span className="font-mono font-medium">{formatIDR(proj.contractValue.welder)}</span>
                               </div>
-                            )}
+                            ) : null}
                           </>
                         )}
                       </div>
@@ -966,7 +1246,107 @@ export default function ProjectManager({ projects, setProjects, transactions, se
                       </td>
                     )}
                   </tr>
-                );
+
+                  {/* Expandable Log Riwayat Row (Shows 5 Latest Changes) */}
+                  {expandedLogProjectId === proj.id && (
+                    <tr className="bg-slate-50/90 border-b-2 border-blue-200/60 animate-in fade-in duration-200">
+                      <td colSpan={isReadOnly ? 8 : 9} className="p-4 sm:p-5">
+                        <div className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 shadow-sm space-y-3.5">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-100">
+                            <div className="flex items-center gap-2.5">
+                              <div className="p-2 bg-blue-50 text-blue-600 rounded-xl border border-blue-100 shadow-2xs">
+                                <History className="w-4 h-4" />
+                              </div>
+                              <div>
+                                <h4 className="font-extrabold text-xs text-slate-900 flex items-center gap-2">
+                                  <span>📜 Log Riwayat Perubahan & Transaksi (5 Terakhir)</span>
+                                  <span className="bg-blue-50 text-blue-700 text-[10px] px-2 py-0.5 rounded-full border border-blue-200 font-mono">
+                                    {proj.code}
+                                  </span>
+                                </h4>
+                                <p className="text-[11px] text-slate-500 mt-0.5">
+                                  Transparansi pembaruan anggaran, pengajuan, voucher pengeluaran, dan riwayat aktivitas proyek <strong>{proj.name}</strong>.
+                                </p>
+                              </div>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => setExpandedLogProjectId(null)}
+                              className="self-start sm:self-auto text-xs text-slate-400 hover:text-slate-700 px-2.5 py-1 rounded-xl hover:bg-slate-100 flex items-center gap-1 transition-all cursor-pointer border border-transparent hover:border-slate-200"
+                            >
+                              <span>Tutup Log</span>
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+
+                          {/* List of 5 History Logs */}
+                          <div className="grid grid-cols-1 gap-2">
+                            {projLogs.length > 0 ? (
+                              projLogs.map((log, idx) => {
+                                let logIcon = <Activity className="w-3.5 h-3.5 text-blue-600" />;
+                                let badgeBg = "bg-blue-50 text-blue-700 border-blue-200";
+
+                                if (log.type === "petycash_expense") {
+                                  logIcon = <Receipt className="w-3.5 h-3.5 text-emerald-600" />;
+                                  badgeBg = "bg-emerald-50 text-emerald-700 border-emerald-200";
+                                } else if (log.type === "petycash_request") {
+                                  logIcon = <DollarSign className="w-3.5 h-3.5 text-amber-600" />;
+                                  badgeBg = "bg-amber-50 text-amber-800 border-amber-200";
+                                } else if (log.type === "invoice") {
+                                  logIcon = <FileText className="w-3.5 h-3.5 text-purple-600" />;
+                                  badgeBg = "bg-purple-50 text-purple-700 border-purple-200";
+                                } else if (log.type === "po") {
+                                  logIcon = <Package className="w-3.5 h-3.5 text-indigo-600" />;
+                                  badgeBg = "bg-indigo-50 text-indigo-700 border-indigo-200";
+                                } else if (log.type === "milestone") {
+                                  logIcon = <Calendar className="w-3.5 h-3.5 text-sky-600" />;
+                                  badgeBg = "bg-sky-50 text-sky-200 text-sky-700";
+                                }
+
+                                return (
+                                  <div
+                                    key={log.id || idx}
+                                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 rounded-xl bg-slate-50/70 border border-slate-100 hover:border-blue-200 transition-all text-xs"
+                                  >
+                                    <div className="flex items-start gap-2.5">
+                                      <div className="p-1.5 bg-white rounded-lg border border-slate-200 shadow-2xs shrink-0 mt-0.5">
+                                        {logIcon}
+                                      </div>
+                                      <div>
+                                        <div className="flex flex-wrap items-center gap-2">
+                                          <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-md border font-mono ${badgeBg}`}>
+                                            {log.action}
+                                          </span>
+                                          <span className="text-[10px] text-slate-400 font-medium flex items-center gap-1">
+                                            <Clock className="w-3 h-3" /> {log.date}
+                                          </span>
+                                        </div>
+                                        <p className="text-slate-800 font-semibold text-xs mt-1 leading-snug">
+                                          {log.description}
+                                        </p>
+                                      </div>
+                                    </div>
+
+                                    <div className="text-[10px] text-slate-500 bg-white px-2.5 py-1 rounded-lg border border-slate-200 shrink-0 self-start sm:self-center flex items-center gap-1 font-sans">
+                                      <UserCheck className="w-3 h-3 text-slate-400" />
+                                      <span>Oleh: <strong className="text-slate-700 font-semibold">{log.pic}</strong></span>
+                                    </div>
+                                  </div>
+                                );
+                              })
+                            ) : (
+                              <div className="p-4 text-center text-slate-400 text-xs italic bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                                Belum ada data log riwayat transaksi atau perubahan data untuk proyek ini.
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              );
               })}
               {filteredProjects.length === 0 && (
                 <tr>
@@ -1094,6 +1474,18 @@ export default function ProjectManager({ projects, setProjects, transactions, se
                     type="text"
                     value={editPic}
                     onChange={(e) => setEditPic(e.target.value)}
+                    className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs focus:ring-1 focus:ring-blue-600 focus:bg-white"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-gray-700 flex items-center gap-1">
+                    <Calendar className="w-3.5 h-3.5 text-blue-600" /> Target Selesai
+                  </label>
+                  <input
+                    type="date"
+                    value={editTargetCompletionDate}
+                    onChange={(e) => setEditTargetCompletionDate(e.target.value)}
                     className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs focus:ring-1 focus:ring-blue-600 focus:bg-white"
                   />
                 </div>

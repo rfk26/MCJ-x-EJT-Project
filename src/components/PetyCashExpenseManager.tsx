@@ -248,7 +248,17 @@ export default function PetyCashExpenseManager({
   React.useEffect(() => {
     if (!isManualNo && !editingExpenseId) {
       const petyCashTxs = transactions.filter((t) => t.type === "PetyCash" && t.petyCashNo);
-      const nextNum = petyCashTxs.length + 1;
+      let maxNum = 0;
+      petyCashTxs.forEach((t) => {
+        if (t.petyCashNo) {
+          const match = t.petyCashNo.match(/(?:PC|REQ-PC)-(\d+)/i) || t.petyCashNo.match(/^(\d+)$/);
+          if (match) {
+            const num = parseInt(match[1], 10);
+            if (num > maxNum) maxNum = num;
+          }
+        }
+      });
+      const nextNum = maxNum + 1;
       setPetyCashNo(`PC-${String(nextNum).padStart(3, "0")}`);
     }
   }, [transactions, isManualNo, editingExpenseId]);
@@ -485,10 +495,11 @@ export default function PetyCashExpenseManager({
     if (!proj) return null;
 
     const contractBase =
-      proj.contractValue.piping +
-      proj.contractValue.electrical +
-      proj.contractValue.mechanical +
-      proj.contractValue.scafolder;
+      (proj.contractValue?.piping || 0) +
+      (proj.contractValue?.electrical || 0) +
+      (proj.contractValue?.mechanical || 0) +
+      (proj.contractValue?.scafolder || 0) +
+      (proj.contractValue?.welder || 0);
 
     if (contractBase === 0) return null;
 
@@ -512,6 +523,12 @@ export default function PetyCashExpenseManager({
   // Filter list
   const expenseList = transactions.filter((t) => t.type === "PetyCash");
 
+  const getPetyCashNumber = (petyCashNo: string | undefined): number => {
+    if (!petyCashNo) return 999999;
+    const match = petyCashNo.match(/(\d+)/);
+    return match ? parseInt(match[1], 10) : 999999;
+  };
+
   const filteredExpenses = expenseList.filter((tx) => {
     if (filterProject !== "all" && tx.projectId !== filterProject) return false;
     if (filterCategory !== "all" && tx.category !== filterCategory) return false;
@@ -525,7 +542,7 @@ export default function PetyCashExpenseManager({
     }
 
     return true;
-  });
+  }).sort((a, b) => getPetyCashNumber(a.petyCashNo) - getPetyCashNumber(b.petyCashNo));
 
   const totalExpenseSum = filteredExpenses.reduce((sum, tx) => sum + tx.amount, 0);
 
@@ -578,7 +595,7 @@ export default function PetyCashExpenseManager({
             {/* LINKED REQUEST SELECTOR (OPTIONAL) */}
             <div className="bg-blue-50/50 border border-blue-200 rounded-xl p-3.5 space-y-2">
               <label className="text-xs font-bold text-blue-900 flex items-center gap-1">
-                <Send className="w-4 h-4 text-blue-600 animate-bounce" />
+                <Send className="w-4 h-4 text-blue-600" />
                 Hubungkan dengan Pengajuan Petty Cash (Otomatis Pre-Fill)
               </label>
               <select
@@ -974,7 +991,7 @@ export default function PetyCashExpenseManager({
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-blue-100 pb-3">
             <div>
               <h3 className="text-xs font-bold text-blue-900 tracking-tight flex items-center gap-1.5">
-                <Send className="w-4.5 h-4.5 text-blue-600 animate-pulse" />
+                <Send className="w-4.5 h-4.5 text-blue-600" />
                 Daftar Pengajuan Petty Cash Menunggu Realisasi Belanja ({transactions.filter(t => t.type === "PetyCashRequest" && (t.status === "Disetujui" || t.status === "Realisasi Sebagian") && getRequestRemaining(t) > 0).length})
               </h3>
               <p className="text-[10px] text-blue-700 mt-0.5 font-medium">

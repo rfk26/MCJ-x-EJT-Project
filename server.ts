@@ -11,6 +11,23 @@ import { sql, eq } from "drizzle-orm";
 const PORT = 3000;
 const JWT_SECRET = process.env.JWT_SECRET || "MCJXEJTSUPERSECRETKEY123!";
 
+// Retry wrapper for DB queries on transient connection drops
+async function withRetry<T>(fn: () => Promise<T>, retries = 2, delayMs = 500): Promise<T> {
+  let lastError: any;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastError = err;
+      console.warn(`[DB Query Attempt ${attempt + 1} failed, retrying...]:`, err instanceof Error ? err.message : err);
+      if (attempt < retries) {
+        await new Promise((res) => setTimeout(res, delayMs * (attempt + 1)));
+      }
+    }
+  }
+  throw lastError;
+}
+
 // Default initial categories
 const DEFAULT_CATEGORIES = [
   "Gaji",
@@ -66,25 +83,25 @@ async function seedDatabase() {
   try {
     console.log("Checking if seeding is required...");
     // 1. Seed Categories if empty
-    const existingCategories = await db.select().from(schema.categories);
+    const existingCategories = await withRetry(() => db.select().from(schema.categories));
     if (existingCategories.length === 0) {
       console.log("Seeding default categories...");
       for (const cat of DEFAULT_CATEGORIES) {
-        await db.insert(schema.categories).values({
+        await withRetry(() => db.insert(schema.categories).values({
           id: cat,
           name: cat,
-        }).onConflictDoNothing();
+        }).onConflictDoNothing());
       }
     }
 
     // 2. Seed Users if empty
-    const existingUsers = await db.select().from(schema.users);
+    const existingUsers = await withRetry(() => db.select().from(schema.users));
     if (existingUsers.length === 0) {
       console.log("Seeding default users...");
-      await db.insert(schema.users).values([
+      await withRetry(() => db.insert(schema.users).values([
         { username: "admin", fullName: "Admin MCJ", password: "mcjxejt1515", role: "karyawan" },
         { username: "mcj x ejt", fullName: "Direktur Utama", password: "mcjejt1515", role: "direktur" }
-      ]);
+      ]));
     }
     console.log("Database seeding check complete.");
   } catch (err) {
@@ -107,22 +124,82 @@ async function startServer() {
   // Run seed check
   await seedDatabase();
 
-  // Socket.io connection logging
+  // Active sockets and online users tracking
+  const socketToUserMap = new Map<string, string>();
+  const onlineUsersMap = new Map<string, { socketIds: Set<string>; fullName: string; role: string; lastSeen: number }>();
+
+  const broadcastOnlineUsers = () => {
+    const list = Array.from(onlineUsersMap.entries()).map(([username, data]) => ({
+      username,
+      fullName: data.fullName,
+      role: data.role,
+      lastSeen: data.lastSeen,
+      isOnline: data.socketIds.size > 0
+    }));
+    io.emit("online_users_changed", list);
+  };
+
+  // Socket.io connection logging & real-time online status
   io.on("connection", (socket) => {
     console.log("Client connected via Socket.IO:", socket.id);
+
+    socket.on("user_online", (userData: { username: string; fullName: string; role: string }) => {
+      if (!userData || !userData.username) return;
+      const cleanUsername = userData.username.trim().toLowerCase();
+      socketToUserMap.set(socket.id, cleanUsername);
+
+      const existing = onlineUsersMap.get(cleanUsername);
+      if (existing) {
+        existing.socketIds.add(socket.id);
+        existing.lastSeen = Date.now();
+        if (userData.fullName) existing.fullName = userData.fullName;
+        if (userData.role) existing.role = userData.role;
+      } else {
+        onlineUsersMap.set(cleanUsername, {
+          socketIds: new Set([socket.id]),
+          fullName: userData.fullName || cleanUsername,
+          role: userData.role || "karyawan",
+          lastSeen: Date.now()
+        });
+      }
+      broadcastOnlineUsers();
+    });
+
+    socket.on("user_offline", (userData: { username: string }) => {
+      if (!userData || !userData.username) return;
+      const cleanUsername = userData.username.trim().toLowerCase();
+      const existing = onlineUsersMap.get(cleanUsername);
+      if (existing) {
+        existing.socketIds.delete(socket.id);
+        existing.lastSeen = Date.now();
+      }
+      socketToUserMap.delete(socket.id);
+      broadcastOnlineUsers();
+    });
+
     socket.on("disconnect", () => {
       console.log("Client disconnected:", socket.id);
+      const username = socketToUserMap.get(socket.id);
+      if (username) {
+        socketToUserMap.delete(socket.id);
+        const existing = onlineUsersMap.get(username);
+        if (existing) {
+          existing.socketIds.delete(socket.id);
+          existing.lastSeen = Date.now();
+        }
+        broadcastOnlineUsers();
+      }
     });
   });
 
   // API Routes (Protected)
   app.get("/api/data", requireAuth, async (req: AuthRequest, res) => {
     try {
-      const projectsData = await db.select().from(schema.projects);
-      const transactionsData = await db.select().from(schema.transactions);
-      const activitiesData = await db.select().from(schema.activities);
-      const categoriesData = await db.select().from(schema.categories);
-      const alertsData = await db.select().from(schema.alerts);
+      const projectsData = await withRetry(() => db.select().from(schema.projects));
+      const transactionsData = await withRetry(() => db.select().from(schema.transactions));
+      const activitiesData = await withRetry(() => db.select().from(schema.activities));
+      const categoriesData = await withRetry(() => db.select().from(schema.categories));
+      const alertsData = await withRetry(() => db.select().from(schema.alerts));
 
       // Map numeric back to number for Transactions
       const transactionsMapped = transactionsData.map((t) => ({
@@ -174,7 +251,7 @@ async function startServer() {
       if (projects !== undefined && Array.isArray(projects)) {
         for (const p of projects) {
           if (!p.id || !p.name || !p.code) continue;
-          await db.insert(schema.projects).values({
+          await withRetry(() => db.insert(schema.projects).values({
             id: p.id,
             name: p.name,
             code: p.code,
@@ -192,6 +269,7 @@ async function startServer() {
             company: p.company || null,
             poNo: p.poNo || null,
             customContractItems: p.customContractItems || null,
+            targetCompletionDate: p.targetCompletionDate || null,
           }).onConflictDoUpdate({
             target: schema.projects.id,
             set: {
@@ -211,23 +289,24 @@ async function startServer() {
               company: p.company || null,
               poNo: p.poNo || null,
               customContractItems: p.customContractItems || null,
+              targetCompletionDate: p.targetCompletionDate || null,
             }
-          });
+          }));
         }
 
         // Clean up deleted projects
         const projectIds = projects.map((p: any) => p.id).filter(Boolean);
         if (projectIds.length > 0) {
-          await db.delete(schema.projects).where(sql`id NOT IN (${sql.join(projectIds.map(id => sql`${id}`), sql`, `)})`);
-        } else {
-          await db.delete(schema.projects);
+          await withRetry(() => db.delete(schema.projects).where(sql`id NOT IN (${sql.join(projectIds.map(id => sql`${id}`), sql`, `)})`));
+        } else if (req.body.allowClearAll === true) {
+          await withRetry(() => db.delete(schema.projects));
         }
       }
 
       if (transactions !== undefined && Array.isArray(transactions)) {
         for (const t of transactions) {
           if (!t.id || !t.projectId) continue;
-          await db.insert(schema.transactions).values({
+          await withRetry(() => db.insert(schema.transactions).values({
             id: t.id,
             projectId: t.projectId,
             type: t.type,
@@ -269,22 +348,22 @@ async function startServer() {
               requestId: t.requestId || null,
               transferProof: t.transferProof || null,
             }
-          });
+          }));
         }
 
         // Clean up deleted transactions
         const transIds = transactions.map((t: any) => t.id).filter(Boolean);
         if (transIds.length > 0) {
-          await db.delete(schema.transactions).where(sql`id NOT IN (${sql.join(transIds.map(id => sql`${id}`), sql`, `)})`);
-        } else {
-          await db.delete(schema.transactions);
+          await withRetry(() => db.delete(schema.transactions).where(sql`id NOT IN (${sql.join(transIds.map(id => sql`${id}`), sql`, `)})`));
+        } else if (req.body.allowClearAll === true) {
+          await withRetry(() => db.delete(schema.transactions));
         }
       }
 
       if (activities !== undefined && Array.isArray(activities)) {
         for (const a of activities) {
           if (!a.id) continue;
-          await db.insert(schema.activities).values({
+          await withRetry(() => db.insert(schema.activities).values({
             id: a.id,
             type: a.type,
             action: a.action,
@@ -302,15 +381,15 @@ async function startServer() {
               date: a.date || new Date().toISOString().split("T")[0],
               projectId: a.projectId || null,
             }
-          });
+          }));
         }
 
         // Clean up deleted activities
         const actIds = activities.map((a: any) => a.id).filter(Boolean);
         if (actIds.length > 0) {
-          await db.delete(schema.activities).where(sql`id NOT IN (${sql.join(actIds.map(id => sql`${id}`), sql`, `)})`);
-        } else {
-          await db.delete(schema.activities);
+          await withRetry(() => db.delete(schema.activities).where(sql`id NOT IN (${sql.join(actIds.map(id => sql`${id}`), sql`, `)})`));
+        } else if (req.body.allowClearAll === true) {
+          await withRetry(() => db.delete(schema.activities));
         }
       }
 
@@ -318,18 +397,18 @@ async function startServer() {
         for (const c of categories) {
           const nameStr = typeof c === "string" ? c : c.name;
           if (!nameStr) continue;
-          await db.insert(schema.categories).values({
+          await withRetry(() => db.insert(schema.categories).values({
             id: nameStr,
             name: nameStr,
-          }).onConflictDoNothing();
+          }).onConflictDoNothing());
         }
 
         // Clean up deleted categories
         const catNames = categories.map((c: any) => typeof c === "string" ? c : c.name).filter(Boolean);
         if (catNames.length > 0) {
-          await db.delete(schema.categories).where(sql`id NOT IN (${sql.join(catNames.map(name => sql`${name}`), sql`, `)})`);
-        } else {
-          await db.delete(schema.categories);
+          await withRetry(() => db.delete(schema.categories).where(sql`id NOT IN (${sql.join(catNames.map(name => sql`${name}`), sql`, `)})`));
+        } else if (req.body.allowClearAll === true) {
+          await withRetry(() => db.delete(schema.categories));
         }
       }
 
@@ -358,7 +437,7 @@ async function startServer() {
 
     try {
       const cleanUsername = username.trim().toLowerCase();
-      const usersFound = await db.select().from(schema.users).where(eq(schema.users.username, cleanUsername));
+      const usersFound = await withRetry(() => db.select().from(schema.users).where(eq(schema.users.username, cleanUsername)));
       const user = usersFound[0];
 
       if (user && user.password === password) {
@@ -449,17 +528,36 @@ async function startServer() {
 
   app.get("/api/users", requireAuth, async (req: AuthRequest, res) => {
     try {
-      const dbUsers = await db.select().from(schema.users);
-      const safeUsers = dbUsers.map((u) => ({
-        username: u.username,
-        fullName: u.fullName,
-        role: u.role
-      }));
+      const dbUsers = await withRetry(() => db.select().from(schema.users));
+      const safeUsers = dbUsers.map((u) => {
+        const onlineEntry = onlineUsersMap.get(u.username);
+        const isOnline = Boolean(onlineEntry && onlineEntry.socketIds.size > 0);
+        return {
+          username: u.username,
+          fullName: u.fullName,
+          role: u.role,
+          isOnline: isOnline,
+          lastSeen: onlineEntry ? onlineEntry.lastSeen : null
+        };
+      });
       res.json(safeUsers);
     } catch (err) {
       console.error("Load users failed:", err);
       res.status(500).json({ success: false, message: "Gagal memuat daftar karyawan." });
     }
+  });
+
+  app.get("/api/users/online", requireAuth, (req: AuthRequest, res) => {
+    const list = Array.from(onlineUsersMap.entries())
+      .filter(([_, data]) => data.socketIds.size > 0)
+      .map(([username, data]) => ({
+        username,
+        fullName: data.fullName,
+        role: data.role,
+        lastSeen: data.lastSeen,
+        isOnline: true
+      }));
+    res.json({ success: true, count: list.length, users: list });
   });
 
   app.post("/api/users/update", requireAuth, async (req: AuthRequest, res) => {

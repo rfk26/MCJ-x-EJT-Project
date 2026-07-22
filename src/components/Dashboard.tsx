@@ -6,7 +6,7 @@
 import React from "react";
 import { Project, Transaction, ProjectStatus, Category, ActivityLog } from "../types";
 import { CATEGORIES } from "../data";
-import { TrendingUp, TrendingDown, Landmark, Wallet, AlertTriangle, FileSpreadsheet, Percent, BarChart3, Clock, CheckSquare, Plus, ShoppingBag, Send, Receipt, FileText, Activity } from "lucide-react";
+import { TrendingUp, TrendingDown, Landmark, Wallet, AlertTriangle, FileSpreadsheet, Percent, BarChart3, Clock, CheckSquare, Plus, ShoppingBag, Send, Receipt, FileText, Activity, Filter, X, Calendar, Search, Printer, Download, Coins } from "lucide-react";
 import { motion } from "motion/react";
 import {
   ResponsiveContainer,
@@ -40,6 +40,73 @@ export default function Dashboard({
   activities = [],
 }: DashboardProps) {
   const [barChartFilter, setBarChartFilter] = React.useState<string>("all");
+
+  const [activityTypeFilter, setActivityTypeFilter] = React.useState<string>("all");
+  const [activityStartDate, setActivityStartDate] = React.useState<string>("");
+  const [activityEndDate, setActivityEndDate] = React.useState<string>("");
+  const [showAuditModal, setShowAuditModal] = React.useState<boolean>(false);
+  const [auditSearchQuery, setAuditSearchQuery] = React.useState<string>("");
+
+  const getFilteredActivitiesList = (activityList: ActivityLog[]) => {
+    let list = selectedProjectId === "all"
+      ? activityList
+      : activityList.filter(act => !act.projectId || act.projectId === selectedProjectId);
+
+    if (activityTypeFilter !== "all") {
+      list = list.filter((act) => {
+        if (activityTypeFilter === "po") {
+          return act.type === "po";
+        }
+        if (activityTypeFilter === "gaji") {
+          const isExpense = act.type === "petycash_expense";
+          const hasGajiKw = act.action.toLowerCase().includes("gaji") || 
+                            act.action.toLowerCase().includes("penggajian") || 
+                            act.description.toLowerCase().includes("gaji") || 
+                            act.description.toLowerCase().includes("penggajian") ||
+                            act.action.toLowerCase().includes("slip");
+          return isExpense && hasGajiKw;
+        }
+        if (activityTypeFilter === "petycash") {
+          if (act.type === "petycash_request") return true;
+          if (act.type === "petycash_expense") {
+            const hasGajiKw = act.action.toLowerCase().includes("gaji") || 
+                              act.action.toLowerCase().includes("penggajian") || 
+                              act.description.toLowerCase().includes("gaji") || 
+                              act.description.toLowerCase().includes("penggajian") ||
+                              act.action.toLowerCase().includes("slip");
+            return !hasGajiKw;
+          }
+          return false;
+        }
+        if (activityTypeFilter === "invoice") {
+          return act.type === "invoice";
+        }
+        if (activityTypeFilter === "project") {
+          return act.type === "project";
+        }
+        return true;
+      });
+    }
+
+    if (activityStartDate) {
+      list = list.filter((act) => act.date >= activityStartDate);
+    }
+    if (activityEndDate) {
+      list = list.filter((act) => act.date <= activityEndDate);
+    }
+
+    if (auditSearchQuery.trim()) {
+      const q = auditSearchQuery.toLowerCase().trim();
+      list = list.filter(
+        (act) =>
+          act.pic.toLowerCase().includes(q) ||
+          act.action.toLowerCase().includes(q) ||
+          act.description.toLowerCase().includes(q)
+      );
+    }
+
+    return list;
+  };
 
   const months = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
 
@@ -89,7 +156,16 @@ export default function Dashboard({
     .reduce((sum, p) => sum + getProjectContractValue(p), 0);
 
   // Taxes
-  const totalPpnRaw = totalContract * 0.11;
+  const totalPpnRaw = projects
+    .filter((p) => selectedProjectId === "all" || p.id === selectedProjectId)
+    .filter((p) => p.status !== ProjectStatus.CANCEL)
+    .reduce((sum, p) => {
+      const base = getProjectContractValue(p);
+      const isHoOrEjt = p.name.toUpperCase().includes("HO") || (p.code && p.code.toUpperCase().includes("HO")) || p.name.toUpperCase().includes("EJT");
+      const rate = isHoOrEjt ? ((p.ppnPercent === 11 || p.ppnPercent === undefined) ? 0 : p.ppnPercent) : (p.ppnPercent !== undefined ? p.ppnPercent : 11);
+      return sum + (base * (rate / 100));
+    }, 0);
+
   const ppnSupplierSpending = filteredTxs
     .filter((t) => t.category && t.category.toLowerCase() === "ppn 11% supplier" && t.type === "PetyCash")
     .reduce((sum, t) => sum + t.amount, 0);
@@ -100,7 +176,8 @@ export default function Dashboard({
     .filter((p) => p.status !== ProjectStatus.CANCEL)
     .reduce((sum, p) => {
       const base = getProjectContractValue(p);
-      const rate = p.pphPercent !== undefined ? p.pphPercent : 4;
+      const isHoOrEjt = p.name.toUpperCase().includes("HO") || (p.code && p.code.toUpperCase().includes("HO")) || p.name.toUpperCase().includes("EJT");
+      const rate = isHoOrEjt ? ((p.pphPercent === 4 || p.pphPercent === undefined) ? 0 : p.pphPercent) : (p.pphPercent !== undefined ? p.pphPercent : 4);
       return sum + (base * (rate / 100));
     }, 0);
   const totalNetContract = totalContract + totalPpn - totalPph;
@@ -236,10 +313,18 @@ export default function Dashboard({
         })
         .reduce((sum, t) => sum + t.amount, 0);
 
-      const ppn = Math.max(0, (contractValue * 0.11) - compPpnSupplierSpending);
+      const compPpnRaw = compProjects.reduce((sum, p) => {
+        const base = getProjectContractValue(p);
+        const isHoOrEjt = p.name.toUpperCase().includes("HO") || (p.code && p.code.toUpperCase().includes("HO")) || p.name.toUpperCase().includes("EJT");
+        const rate = isHoOrEjt ? ((p.ppnPercent === 11 || p.ppnPercent === undefined) ? 0 : p.ppnPercent) : (p.ppnPercent !== undefined ? p.ppnPercent : 11);
+        return sum + (base * (rate / 100));
+      }, 0);
+
+      const ppn = Math.max(0, compPpnRaw - compPpnSupplierSpending);
       const pph = compProjects.reduce((sum, p) => {
         const base = getProjectContractValue(p);
-        const rate = p.pphPercent !== undefined ? p.pphPercent : 4;
+        const isHoOrEjt = p.name.toUpperCase().includes("HO") || (p.code && p.code.toUpperCase().includes("HO")) || p.name.toUpperCase().includes("EJT");
+        const rate = isHoOrEjt ? ((p.pphPercent === 4 || p.pphPercent === undefined) ? 0 : p.pphPercent) : (p.pphPercent !== undefined ? p.pphPercent : 4);
         return sum + (base * (rate / 100));
       }, 0);
       const netContract = contractValue + ppn - pph;
@@ -971,23 +1056,75 @@ export default function Dashboard({
         <div className="lg:col-span-1 bg-white border border-gray-200 rounded-2xl p-6 shadow-sm space-y-4">
           <div className="flex justify-between items-center">
             <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
-              <Activity className="w-4 h-4 text-blue-600 animate-pulse" /> Riwayat Aktivitas
+              <Activity className="w-4 h-4 text-blue-600" /> Riwayat Aktivitas
             </h3>
-            <span className="text-[10px] bg-blue-50 text-blue-700 font-bold px-2 py-0.5 rounded-full">
-              Karyawan
-            </span>
+            <button
+              onClick={() => setShowAuditModal(true)}
+              className="text-[10px] bg-blue-50 hover:bg-blue-100 text-blue-700 font-extrabold px-2.5 py-1 rounded-full transition-all flex items-center gap-1 cursor-pointer border border-blue-100"
+            >
+              <Filter className="w-2.5 h-2.5" /> Mode Audit
+            </button>
           </div>
 
-          <div className="space-y-3.5 max-h-[350px] overflow-y-auto pr-1">
+          {/* Quick Inline Filters */}
+          <div className="bg-slate-50 p-3 rounded-xl border border-gray-100 space-y-2 text-[10px]">
+            <div className="flex items-center justify-between font-bold text-slate-700 border-b border-gray-200/60 pb-1">
+              <span className="uppercase text-[9px] text-gray-400 tracking-wider">Filter Cepat</span>
+              {(activityTypeFilter !== "all" || activityStartDate !== "" || activityEndDate !== "") && (
+                <button
+                  onClick={() => {
+                    setActivityTypeFilter("all");
+                    setActivityStartDate("");
+                    setActivityEndDate("");
+                  }}
+                  className="text-blue-600 hover:text-blue-700 font-extrabold flex items-center gap-0.5 cursor-pointer"
+                >
+                  <X className="w-2.5 h-2.5" /> Reset
+                </button>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 gap-1.5">
+              <select
+                value={activityTypeFilter}
+                onChange={(e) => setActivityTypeFilter(e.target.value)}
+                className="w-full bg-white border border-gray-200 rounded px-1.5 py-0.5 font-semibold text-gray-700 text-[10px]"
+              >
+                <option value="all">Semua Tipe Transaksi</option>
+                <option value="po">Purchase Order (PO)</option>
+                <option value="gaji">Gaji Karyawan</option>
+                <option value="petycash">Petty Cash</option>
+                <option value="invoice">Invoice / Tagihan</option>
+                <option value="project">Manajemen Proyek</option>
+              </select>
+
+              <div className="grid grid-cols-2 gap-1">
+                <input
+                  type="date"
+                  value={activityStartDate}
+                  onChange={(e) => setActivityStartDate(e.target.value)}
+                  className="w-full bg-white border border-gray-200 rounded px-1 py-0.5 font-semibold text-gray-700 text-[9px]"
+                  placeholder="Mulai"
+                />
+                <input
+                  type="date"
+                  value={activityEndDate}
+                  onChange={(e) => setActivityEndDate(e.target.value)}
+                  className="w-full bg-white border border-gray-200 rounded px-1 py-0.5 font-semibold text-gray-700 text-[9px]"
+                  placeholder="Akhir"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-3.5 max-h-[280px] overflow-y-auto pr-1">
             {(() => {
-              const filteredActivities = selectedProjectId === "all"
-                ? activities
-                : activities.filter(act => !act.projectId || act.projectId === selectedProjectId);
+              const filteredActivities = getFilteredActivitiesList(activities);
 
               if (filteredActivities.length === 0) {
                 return (
                   <div className="p-8 text-center text-gray-400 text-xs italic">
-                    Belum ada riwayat aktivitas untuk lingkup ini.
+                    Tidak ada aktivitas cocok dengan filter ini.
                   </div>
                 );
               }
@@ -1003,8 +1140,18 @@ export default function Dashboard({
                   icon = <Send className="w-3.5 h-3.5" />;
                   colorClass = "bg-purple-50 text-purple-600 border border-purple-100";
                 } else if (act.type === "petycash_expense") {
-                  icon = <Receipt className="w-3.5 h-3.5" />;
-                  colorClass = "bg-rose-50 text-rose-600 border border-rose-100";
+                  const isGaji = act.action.toLowerCase().includes("gaji") || 
+                                 act.action.toLowerCase().includes("penggajian") || 
+                                 act.description.toLowerCase().includes("gaji") || 
+                                 act.description.toLowerCase().includes("penggajian") ||
+                                 act.action.toLowerCase().includes("slip");
+                  if (isGaji) {
+                    icon = <Coins className="w-3.5 h-3.5 text-rose-600" />;
+                    colorClass = "bg-rose-50 text-rose-600 border border-rose-100";
+                  } else {
+                    icon = <Receipt className="w-3.5 h-3.5" />;
+                    colorClass = "bg-rose-50 text-rose-600 border border-rose-100";
+                  }
                 } else if (act.type === "invoice") {
                   icon = <Landmark className="w-3.5 h-3.5" />;
                   colorClass = "bg-emerald-50 text-emerald-600 border border-emerald-100";
@@ -1123,6 +1270,321 @@ export default function Dashboard({
           </div>
         </div>
       </div>
+
+      {/* AUDIT HISTORIS MODAL */}
+      {showAuditModal && (
+        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl border border-gray-200 w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-150">
+            {/* Modal Header */}
+            <div className="bg-slate-900 text-white p-5 flex items-center justify-between shrink-0">
+              <div className="space-y-1">
+                <h3 className="text-base font-extrabold flex items-center gap-2">
+                  <Activity className="w-5 h-5 text-blue-400" /> Audit Historis Aktivitas Proyek (Jejak Log)
+                </h3>
+                <p className="text-[11px] text-slate-300 font-medium">
+                  Laporan jejak audit resmi transaksi dan aktivitas operasional untuk jajaran direksi.
+                </p>
+              </div>
+              <button
+                onClick={() => setShowAuditModal(false)}
+                className="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition-all cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Filter Controls */}
+            <div className="bg-slate-50 p-5 border-b border-gray-200 grid grid-cols-1 md:grid-cols-4 gap-4 shrink-0 text-xs">
+              {/* Search */}
+              <div className="space-y-1">
+                <label className="font-extrabold text-gray-500 uppercase text-[9px] tracking-wider block">
+                  Cari PIC / Aktivitas / Deskripsi
+                </label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="Cari PIC, tindakan, atau nomor..."
+                    value={auditSearchQuery}
+                    onChange={(e) => setAuditSearchQuery(e.target.value)}
+                    className="w-full bg-white border border-gray-200 rounded-lg pl-8 pr-3 py-1.5 font-semibold text-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 text-xs"
+                  />
+                  <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                </div>
+              </div>
+
+              {/* Tipe Transaksi Select */}
+              <div className="space-y-1">
+                <label className="font-extrabold text-gray-500 uppercase text-[9px] tracking-wider block">
+                  Tipe Transaksi
+                </label>
+                <select
+                  value={activityTypeFilter}
+                  onChange={(e) => setActivityTypeFilter(e.target.value)}
+                  className="w-full bg-white border border-gray-200 rounded-lg px-2 py-1.5 font-semibold text-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 cursor-pointer text-xs"
+                >
+                  <option value="all">Semua Tipe Transaksi / Aktivitas</option>
+                  <option value="po">Purchase Order (PO)</option>
+                  <option value="gaji">Gaji / Penggajian Karyawan</option>
+                  <option value="petycash">Petty Cash (Kas Kecil)</option>
+                  <option value="invoice">Invoice / Tagihan</option>
+                  <option value="project">Manajemen Proyek</option>
+                </select>
+              </div>
+
+              {/* Date Range Start */}
+              <div className="space-y-1">
+                <label className="font-extrabold text-gray-500 uppercase text-[9px] tracking-wider block">
+                  Dari Tanggal
+                </label>
+                <div className="relative">
+                  <input
+                    type="date"
+                    value={activityStartDate}
+                    onChange={(e) => setActivityStartDate(e.target.value)}
+                    className="w-full bg-white border border-gray-200 rounded-lg pl-8 pr-3 py-1.5 font-semibold text-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 text-xs"
+                  />
+                  <Calendar className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                </div>
+              </div>
+
+              {/* Date Range End */}
+              <div className="space-y-1">
+                <label className="font-extrabold text-gray-500 uppercase text-[9px] tracking-wider block">
+                  Hingga Tanggal
+                </label>
+                <div className="relative">
+                  <input
+                    type="date"
+                    value={activityEndDate}
+                    onChange={(e) => setActivityEndDate(e.target.value)}
+                    className="w-full bg-white border border-gray-200 rounded-lg pl-8 pr-3 py-1.5 font-semibold text-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 text-xs"
+                  />
+                  <Calendar className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                </div>
+              </div>
+            </div>
+
+            {/* Clear Filter Bar */}
+            {(activityTypeFilter !== "all" || activityStartDate !== "" || activityEndDate !== "" || auditSearchQuery !== "") && (
+              <div className="bg-blue-50 px-5 py-2.5 border-b border-blue-100 flex items-center justify-between text-xs text-blue-800 shrink-0">
+                <div className="flex items-center gap-1.5 font-semibold">
+                  <Filter className="w-3.5 h-3.5 text-blue-600" />
+                  <span>Filter Aktif Berhasil Diterapkan. Menunjukkan hasil kustomisasi.</span>
+                </div>
+                <button
+                  onClick={() => {
+                    setActivityTypeFilter("all");
+                    setActivityStartDate("");
+                    setActivityEndDate("");
+                    setAuditSearchQuery("");
+                  }}
+                  className="font-bold text-blue-700 hover:text-blue-900 hover:underline cursor-pointer flex items-center gap-1 text-xs"
+                >
+                  <X className="w-3 h-3" /> Bersihkan Filter
+                </button>
+              </div>
+            )}
+
+            {/* Modal Main Content (Log list/table) */}
+            <div className="flex-1 overflow-y-auto p-5 space-y-3.5" id="printable-audit-section">
+              {(() => {
+                const filtered = getFilteredActivitiesList(activities);
+
+                if (filtered.length === 0) {
+                  return (
+                    <div className="py-16 text-center text-gray-400 text-sm italic space-y-2">
+                      <Filter className="w-10 h-10 text-gray-300 mx-auto" />
+                      <p className="font-semibold text-gray-500">Tidak ditemukan riwayat aktivitas yang cocok dengan filter atau kueri pencarian Anda.</p>
+                      <p className="text-[11px] text-gray-400 font-normal">Cobalah mengubah filter pencarian Anda atau memilih proyek lain.</p>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="border border-gray-200 rounded-xl overflow-hidden bg-white shadow-sm">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="bg-slate-100 text-slate-700 font-extrabold uppercase text-[10px] tracking-wider border-b border-gray-200">
+                          <th className="p-3.5 w-24">Tanggal</th>
+                          <th className="p-3.5 w-32">Kategori</th>
+                          <th className="p-3.5 w-32">PIC / Aktor</th>
+                          <th className="p-3.5">Tindakan / Aktivitas</th>
+                          <th className="p-3.5">Deskripsi Detail</th>
+                          <th className="p-3.5 w-44">Proyek Terkait</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {filtered.map((act) => {
+                          let typeLabel = "Proyek";
+                          let typeColor = "bg-indigo-50 text-indigo-700 border border-indigo-100";
+                          
+                          if (act.type === "po") {
+                            typeLabel = "Purchase Order";
+                            typeColor = "bg-amber-50 text-amber-700 border border-amber-100";
+                          } else if (act.type === "petycash_request") {
+                            typeLabel = "Kas Kecil (Pengajuan)";
+                            typeColor = "bg-purple-50 text-purple-700 border border-purple-100";
+                          } else if (act.type === "petycash_expense") {
+                            const isGaji = act.action.toLowerCase().includes("gaji") || 
+                                           act.action.toLowerCase().includes("penggajian") || 
+                                           act.description.toLowerCase().includes("gaji") || 
+                                           act.description.toLowerCase().includes("penggajian") ||
+                                           act.action.toLowerCase().includes("slip");
+                            if (isGaji) {
+                              typeLabel = "Gaji Karyawan";
+                              typeColor = "bg-rose-100 text-rose-800 border border-rose-200 font-bold";
+                            } else {
+                              typeLabel = "Kas Kecil (Pengeluaran)";
+                              typeColor = "bg-rose-50 text-rose-700 border border-rose-100";
+                            }
+                          } else if (act.type === "invoice") {
+                            typeLabel = "Invoice / Tagihan";
+                            typeColor = "bg-emerald-50 text-emerald-700 border border-emerald-100";
+                          }
+
+                          const linkedProj = projects.find((p) => p.id === act.projectId);
+
+                          return (
+                            <tr key={act.id} className="hover:bg-slate-50 transition-colors">
+                              <td className="p-3.5 font-mono font-semibold text-gray-500 whitespace-nowrap">
+                                {act.date}
+                              </td>
+                              <td className="p-3.5 whitespace-nowrap">
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${typeColor}`}>
+                                  {typeLabel}
+                                </span>
+                              </td>
+                              <td className="p-3.5 font-bold text-gray-900 truncate max-w-[120px]" title={act.pic}>
+                                👤 {act.pic}
+                              </td>
+                              <td className="p-3.5 font-extrabold text-blue-900">
+                                {act.action}
+                              </td>
+                              <td className="p-3.5 text-gray-600 font-sans leading-relaxed break-words max-w-xs">
+                                {act.description}
+                              </td>
+                              <td className="p-3.5 font-semibold text-slate-700 max-w-[150px] truncate" title={linkedProj ? linkedProj.name : "Sistem Umum"}>
+                                🏢 {linkedProj ? linkedProj.name : "Sistem / Umum"}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="bg-slate-50 px-5 py-4 border-t border-gray-200 flex items-center justify-between shrink-0">
+              <span className="text-[11px] font-bold text-gray-500 font-mono">
+                Total data audit: {getFilteredActivitiesList(activities).length} dari {activities.length} aktivitas terekam.
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const printable = document.getElementById("printable-audit-section");
+                    if (!printable) return;
+                    const printWindow = window.open("", "_blank");
+                    if (!printWindow) return;
+
+                    printWindow.document.write(`
+                      <html>
+                        <head>
+                          <title>Audit_Historis_Aktivitas_${selectedProjectId}_${Date.now()}</title>
+                          <style>
+                            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; padding: 30px; font-size: 11px; color: #333; }
+                            h2 { text-transform: uppercase; font-size: 16px; margin-bottom: 2px; color: #0f172a; border-bottom: 2px solid #000; padding-bottom: 5px; }
+                            h4 { font-size: 10px; font-weight: normal; color: #64748b; margin-top: 0; margin-bottom: 20px; text-transform: uppercase; letter-spacing: 0.05em; }
+                            table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+                            th { background: #f1f5f9; border: 1px solid #cbd5e1; padding: 8px; font-weight: bold; text-align: left; font-size: 10px; text-transform: uppercase; }
+                            td { border: 1px solid #e2e8f0; padding: 8px; line-height: 1.4; }
+                            .badge { display: inline-block; padding: 2px 5px; border-radius: 3px; font-size: 9px; font-weight: bold; text-transform: uppercase; border: 1px solid #cbd5e1; background: #f8fafc; }
+                            .footer { margin-top: 40px; font-size: 9px; color: #94a3b8; font-family: monospace; display: flex; justify-content: space-between; }
+                            .signature-section { margin-top: 60px; display: grid; grid-template-cols: repeat(3, 1fr); gap: 40px; text-align: center; font-size: 11px; }
+                            .sig-box { margin-top: 50px; border-top: 1px solid #000; padding-top: 5px; font-weight: bold; }
+                          </style>
+                        </head>
+                        <body>
+                          <h2>AUDIT HISTORIS AKTIVITAS PROYEK</h2>
+                          <h4>Dokumen Resmi Peninjauan Direksi | Dicetak pada: ${new Date().toLocaleString("id-ID")}</h4>
+                          <table>
+                            <thead>
+                              <tr>
+                                <th>Tanggal</th>
+                                <th>Kategori</th>
+                                <th>PIC / Aktor</th>
+                                <th>Aktivitas</th>
+                                <th>Deskripsi Detail</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              ${getFilteredActivitiesList(activities).map(act => {
+                                let typeLabel = "Proyek";
+                                if (act.type === "po") typeLabel = "PO";
+                                else if (act.type === "petycash_request") typeLabel = "Kas Kecil (R)";
+                                else if (act.type === "petycash_expense") {
+                                  const isGaji = act.action.toLowerCase().includes("gaji") || act.action.toLowerCase().includes("penggajian") || act.action.toLowerCase().includes("slip");
+                                  typeLabel = isGaji ? "Gaji" : "Kas Kecil (E)";
+                                }
+                                else if (act.type === "invoice") typeLabel = "Invoice";
+
+                                return `
+                                  <tr>
+                                    <td style="font-family: monospace; font-weight: bold;">${act.date}</td>
+                                    <td><span class="badge">${typeLabel}</span></td>
+                                    <td><strong>${act.pic}</strong></td>
+                                    <td style="color: #1e3a8a; font-weight: bold;">${act.action}</td>
+                                    <td>${act.description}</td>
+                                  </tr>
+                                `;
+                              }).join("")}
+                            </tbody>
+                          </table>
+
+                          <div class="signature-section">
+                            <div>
+                              <p>Disiapkan Oleh,</p>
+                              <div class="sig-box">Pengawas Lapangan</div>
+                            </div>
+                            <div>
+                              <p>Diverifikasi Oleh,</p>
+                              <div class="sig-box">Project Manager</div>
+                            </div>
+                            <div>
+                              <p>Disetujui &amp; Disahkan Oleh,</p>
+                              <div class="sig-box">Direksi Utama</div>
+                            </div>
+                          </div>
+
+                          <div class="footer">
+                            <span>Audit Log ID: ${Math.random().toString(36).substring(2, 10).toUpperCase()}</span>
+                            <span>Halaman 1 dari 1</span>
+                          </div>
+                          <script>window.onload = function() { window.print(); window.close(); }</script>
+                        </body>
+                      </html>
+                    `);
+                    printWindow.document.close();
+                  }}
+                  className="bg-slate-800 hover:bg-slate-900 text-white font-semibold text-xs px-4 py-2 rounded-xl shadow transition-all cursor-pointer flex items-center gap-1.5"
+                >
+                  <Printer className="w-3.5 h-3.5" /> Cetak Laporan Audit
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowAuditModal(false)}
+                  className="bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold text-xs px-4 py-2 rounded-xl border border-gray-200 transition-all cursor-pointer"
+                >
+                  Tutup
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

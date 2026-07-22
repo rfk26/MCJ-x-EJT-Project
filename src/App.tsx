@@ -24,6 +24,7 @@ import {
   Smartphone,
   Download,
   ShieldCheck,
+  Lock,
   Users,
   UserPlus,
   Key,
@@ -133,7 +134,9 @@ export default function App() {
   const [regLoading, setRegLoading] = useState(false);
 
   // USER MANAGEMENT STATES
-  const [userList, setUserList] = useState<{ username: string; fullName: string; role: string }[]>([]);
+  const [userList, setUserList] = useState<{ username: string; fullName: string; role: string; isOnline?: boolean; lastSeen?: number | null }[]>([]);
+  const [userFilterStatus, setUserFilterStatus] = useState<"all" | "online" | "offline">("all");
+  const [userSearchQuery, setUserSearchQuery] = useState("");
   const [showUserMgmtModal, setShowUserMgmtModal] = useState(false);
   const [mgmtUsername, setMgmtUsername] = useState("");
   const [mgmtFullName, setMgmtFullName] = useState("");
@@ -169,9 +172,22 @@ export default function App() {
     ]);
   });
 
+  const sanitizeProjects = (projList: Project[]): Project[] => {
+    return projList.map((p) => {
+      const isHoOrEjt = p.name.toUpperCase().includes("HO") || (p.code && p.code.toUpperCase().includes("HO")) || p.name.toUpperCase().includes("EJT");
+      if (isHoOrEjt) {
+        const ppnPercent = (p.ppnPercent === 11 || p.ppnPercent === undefined) ? 0 : p.ppnPercent;
+        const pphPercent = (p.pphPercent === 4 || p.pphPercent === undefined) ? 0 : p.pphPercent;
+        return { ...p, ppnPercent, pphPercent };
+      }
+      return p;
+    });
+  };
+
   // STATE DEFINITIONS
   const [projects, setProjects] = useState<Project[]>(() => {
-    return safeJsonParse<Project[]>("mcj_projects", []); // Default to empty array as requested
+    const loaded = safeJsonParse<Project[]>("mcj_projects", []);
+    return sanitizeProjects(loaded);
   });
 
   const [transactions, setTransactions] = useState<Transaction[]>(() => {
@@ -228,8 +244,10 @@ export default function App() {
   }, [isDarkMode]);
 
   // REAL-TIME SERVER SYNC LOGIC
+  const [initialDataLoaded, setInitialDataLoaded] = useState<boolean>(false);
   const [serverLastUpdated, setServerLastUpdated] = useState<number>(0);
   const isSyncingRef = useRef(false);
+  const socketRef = useRef<any>(null);
 
   // Secure API fetch headers helper
   const getAuthHeaders = () => {
@@ -282,14 +300,23 @@ export default function App() {
       });
       if (res.ok) {
         const data = await res.json();
-        setUserList(data);
+        if (Array.isArray(data)) {
+          setUserList(
+            data.map((u: any) => ({
+              ...u,
+              isOnline: Boolean(
+                u.isOnline || (currentUser && u.username?.toLowerCase() === currentUser.username?.toLowerCase())
+              )
+            }))
+          );
+        }
       }
     } catch (err) {
-      console.error("Failed to fetch users list from database:", err);
+      console.warn("Failed to fetch users list from database:", err instanceof Error ? err.message : err);
     }
   };
 
-  // Initial load from server on mount
+  // Initial load from server on mount or login
   useEffect(() => {
     const loadInitialData = async () => {
       if (!userRole) return; // Prevent initial fetch before logged in
@@ -302,6 +329,13 @@ export default function App() {
           // Token expired or invalid during session
           handleLogout();
           return;
+        }
+        if (!res.ok) {
+          throw new Error(`Server returned status ${res.status}`);
+        }
+        const contentType = res.headers.get("content-type");
+        if (!contentType || !contentType.includes("application/json")) {
+          throw new Error("Server returned non-JSON response");
         }
         const data = await res.json();
         
@@ -332,14 +366,14 @@ export default function App() {
             });
             const seedResult = await seedRes.json();
             if (seedResult.success) {
-              setProjects(projectsToSeed);
+              setProjects(sanitizeProjects(projectsToSeed));
               setTransactions(transactionsToSeed);
               setActivities(activitiesToSeed);
               setCategories(categoriesToSeed);
               setServerLastUpdated(seedResult.lastUpdated);
             }
           } else {
-            setProjects(projectsData);
+            setProjects(sanitizeProjects(projectsData));
             setTransactions(transactionsData);
             setActivities(activitiesData);
             setCategories(categoriesData);
@@ -347,7 +381,7 @@ export default function App() {
           }
         } else {
           // Server has data, load it
-          setProjects(projectsData);
+          setProjects(sanitizeProjects(projectsData));
           setTransactions(transactionsData);
           setActivities(activitiesData);
           setCategories(categoriesData);
@@ -356,8 +390,9 @@ export default function App() {
 
         // Fetch user list too
         await fetchUsers();
+        setInitialDataLoaded(true);
       } catch (err) {
-        console.error("Failed to fetch initial server data:", err);
+        console.warn("Failed to fetch initial server data:", err instanceof Error ? err.message : err);
       } finally {
         setTimeout(() => {
           isSyncingRef.current = false;
@@ -366,19 +401,28 @@ export default function App() {
     };
 
     loadInitialData();
-  }, []);
+  }, [userRole]);
 
-  // Push local updates to server
+  // Push local updates to server (ONLY AFTER initial data is loaded into state)
   useEffect(() => {
-    if (isSyncingRef.current) return;
+    if (!initialDataLoaded || !userRole || isSyncingRef.current) return;
+
+    // Save to localStorage as secondary backup
+    try {
+      localStorage.setItem("mcj_projects", JSON.stringify(projects));
+      localStorage.setItem("mcj_transactions", JSON.stringify(transactions));
+      localStorage.setItem("mcj_activities", JSON.stringify(activities));
+      localStorage.setItem("mcj_categories", JSON.stringify(categories));
+    } catch (e) {
+      console.warn("Failed saving to localStorage:", e);
+    }
 
     const pushData = async () => {
-      if (!userRole) return;
       try {
         const res = await fetch("/api/data/update", {
           method: "POST",
           headers: getAuthHeaders(),
-          body: JSON.stringify({ projects, transactions, activities, categories }),
+          body: JSON.stringify({ projects, transactions, activities, categories, allowClearAll: true }),
         });
         const result = await res.json();
         if (result.success) {
@@ -389,31 +433,45 @@ export default function App() {
           }, 100);
         }
       } catch (err) {
-        console.error("Failed to push update to server:", err);
+        console.warn("Push update to server skipped (network pause):", err instanceof Error ? err.message : err);
       }
     };
 
     pushData();
-  }, [projects, transactions, activities, categories]);
+  }, [projects, transactions, activities, categories, initialDataLoaded, userRole]);
 
   // Poll server for updates every 3 seconds to keep multiple computers in real-time sync
   useEffect(() => {
     const pollInterval = setInterval(async () => {
-      if (isSyncingRef.current || !userRole) return;
+      if (isSyncingRef.current || !userRole || !initialDataLoaded) return;
       try {
         const res = await fetch("/api/data/status");
+        if (!res.ok) return;
+        const contentType = res.headers.get("content-type");
+        if (!contentType || !contentType.includes("application/json")) {
+          return;
+        }
         const status = await res.json();
-        if (status.lastUpdated > serverLastUpdated) {
+        if (status && typeof status.lastUpdated === "number" && status.lastUpdated > serverLastUpdated) {
           isSyncingRef.current = true;
           const dataRes = await fetch("/api/data", {
             headers: getAuthHeaders()
           });
+          if (!dataRes.ok) {
+            isSyncingRef.current = false;
+            return;
+          }
+          const dataContentType = dataRes.headers.get("content-type");
+          if (!dataContentType || !dataContentType.includes("application/json")) {
+            isSyncingRef.current = false;
+            return;
+          }
           const data = await dataRes.json();
           
-          setProjects(Array.isArray(data?.projects) ? data.projects : []);
-          setTransactions(Array.isArray(data?.transactions) ? data.transactions : []);
-          setActivities(Array.isArray(data?.activities) ? data.activities : []);
-          setCategories(Array.isArray(data?.categories) ? data.categories : categories);
+          if (Array.isArray(data?.projects)) setProjects(sanitizeProjects(data.projects));
+          if (Array.isArray(data?.transactions)) setTransactions(data.transactions);
+          if (Array.isArray(data?.activities)) setActivities(data.activities);
+          if (Array.isArray(data?.categories)) setCategories(data.categories);
           setServerLastUpdated(typeof data?.lastUpdated === "number" ? data.lastUpdated : Date.now());
           
           // Sync users
@@ -424,21 +482,43 @@ export default function App() {
           }, 100);
         }
       } catch (err) {
-        console.error("Failed to poll server updates:", err);
+        // Soft error log during transient background network polling
+        console.warn("Server update poll skipped:", err instanceof Error ? err.message : err);
       }
     }, 3000);
 
     return () => clearInterval(pollInterval);
-  }, [serverLastUpdated]);
+  }, [serverLastUpdated, userRole, initialDataLoaded]);
 
   // Real-time socket updates
   useEffect(() => {
     if (!userRole) return;
 
     const socket = io();
+    socketRef.current = socket;
 
     socket.on("connect", () => {
       console.log("Connected to Socket.IO real-time server");
+      if (currentUser) {
+        socket.emit("user_online", {
+          username: currentUser.username,
+          fullName: currentUser.fullName,
+          role: currentUser.role
+        });
+      }
+    });
+
+    socket.on("online_users_changed", (onlineList: Array<{ username: string; fullName: string; role: string; isOnline: boolean; lastSeen: number }>) => {
+      const onlineSet = new Set(onlineList.filter((o) => o.isOnline).map((o) => o.username.toLowerCase()));
+      setUserList((prev) =>
+        prev.map((u) => {
+          const isMe = currentUser && u.username.toLowerCase() === currentUser.username.toLowerCase();
+          return {
+            ...u,
+            isOnline: Boolean(isMe || onlineSet.has(u.username.toLowerCase()))
+          };
+        })
+      );
     });
 
     socket.on("data_updated", async (status: { lastUpdated: number }) => {
@@ -459,10 +539,10 @@ export default function App() {
           setActivities(Array.isArray(data?.activities) ? data.activities : []);
           setCategories(Array.isArray(data?.categories) ? data.categories : categories);
           setServerLastUpdated(typeof data?.lastUpdated === "number" ? data.lastUpdated : Date.now());
-          
+
           await fetchUsers();
         } catch (err) {
-          console.error("Socket update fetch failed:", err);
+          console.warn("Socket update fetch skipped:", err instanceof Error ? err.message : err);
         } finally {
           isSyncingRef.current = false;
         }
@@ -476,7 +556,7 @@ export default function App() {
     return () => {
       socket.disconnect();
     };
-  }, [userRole, serverLastUpdated]);
+  }, [userRole, serverLastUpdated, currentUser]);
 
   const addActivity = (
     type: "project" | "po" | "petycash_request" | "petycash_expense" | "invoice",
@@ -541,6 +621,10 @@ export default function App() {
     e.preventDefault();
     setMgmtError(null);
     setMgmtSuccess(null);
+    if (userRole !== "admin" && userRole !== "karyawan") {
+      setMgmtError("Akses ditolak: Anda hanya memiliki hak akses Read-Only.");
+      return;
+    }
     if (!mgmtUsername.trim() || !mgmtFullName.trim() || (!mgmtEditingUser && !mgmtPassword)) {
       setMgmtError("Harap isi semua kolom wajib!");
       return;
@@ -576,6 +660,7 @@ export default function App() {
   };
 
   const handleEditUserClick = (u: { username: string; fullName: string; role: string }) => {
+    if (userRole !== "admin" && userRole !== "karyawan") return;
     setMgmtUsername(u.username);
     setMgmtFullName(u.fullName);
     setMgmtPassword("");
@@ -586,6 +671,10 @@ export default function App() {
   };
 
   const handleDeleteUser = async (usernameToDelete: string) => {
+    if (userRole !== "admin" && userRole !== "karyawan") {
+      alert("Akses ditolak: Anda hanya memiliki hak akses Read-Only.");
+      return;
+    }
     if (usernameToDelete === "admin") {
       alert("Akun default 'admin' tidak dapat dihapus demi keamanan sistem.");
       return;
@@ -726,6 +815,14 @@ export default function App() {
           localStorage.setItem("mcj_current_user", JSON.stringify(user));
           localStorage.setItem("mcj_user_role", user.role);
 
+          if (socketRef.current) {
+            socketRef.current.emit("user_online", {
+              username: user.username,
+              fullName: user.fullName,
+              role: user.role
+            });
+          }
+
           setAppToast({ 
             message: `Berhasil masuk sebagai ${user.fullName} (${getRoleLabel(user.role)}).`, 
             type: "success" 
@@ -744,6 +841,9 @@ export default function App() {
   };
 
   const handleLogout = async () => {
+    if (socketRef.current && currentUser) {
+      socketRef.current.emit("user_offline", { username: currentUser.username });
+    }
     const savedToken = localStorage.getItem("mcj_auth_token") || sessionStorage.getItem("mcj_auth_token");
     if (savedToken) {
       try {
@@ -796,7 +896,7 @@ export default function App() {
             className="space-y-5"
           >
             {loginError && (
-              <div className="p-3.5 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-500/20 rounded-xl text-xs text-red-600 dark:text-red-400 flex items-center gap-2.5 animate-pulse font-medium">
+              <div className="p-3.5 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-500/20 rounded-xl text-xs text-red-600 dark:text-red-400 flex items-center gap-2.5 font-medium">
                 <AlertTriangle className="w-4 h-4 shrink-0" />
                 <span>{loginError}</span>
               </div>
@@ -1053,7 +1153,7 @@ export default function App() {
             <div className="hidden xl:flex flex-col text-right mr-1 border-r border-slate-200 dark:border-slate-800 pr-4">
               <span className="text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Status Sistem</span>
               <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5 mt-0.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                 {projects.filter(p => p.status !== ProjectStatus.CANCEL).length} Proyek Aktif
               </span>
             </div>
@@ -1071,8 +1171,8 @@ export default function App() {
               </div>
             )}
 
-            {/* Kelola Karyawan Button (Admin/Karyawan only) */}
-            {(userRole === "admin" || userRole === "karyawan") && (
+            {/* Kelola Karyawan Button (Visible for all logged-in roles; ReadOnly for PM/other non-admins) */}
+            {currentUser && (
               <button
                 onClick={() => {
                   setMgmtUsername("");
@@ -1084,11 +1184,26 @@ export default function App() {
                   setMgmtSuccess(null);
                   setShowUserMgmtModal(true);
                 }}
-                className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-850 transition-colors cursor-pointer flex items-center gap-1.5"
-                title="Kelola Akun Pengguna Karyawan"
+                className="p-2 md:px-3 md:py-2 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-all cursor-pointer flex items-center gap-2 shadow-xs"
+                title="Kelola Akun Pengguna & Status Online Karyawan"
               >
-                <Users className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-                <span className="text-xs font-semibold hidden md:inline">Karyawan</span>
+                <div className="relative flex items-center">
+                  <Users className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                  {userList.some((u) => u.isOnline || (currentUser && u.username.toLowerCase() === currentUser.username.toLowerCase())) && (
+                    <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-emerald-500 rounded-full border-2 border-white dark:border-slate-900" />
+                  )}
+                </div>
+                <span className="text-xs font-bold hidden md:inline">Karyawan</span>
+                {userList.filter((u) => u.isOnline || (currentUser && u.username.toLowerCase() === currentUser.username.toLowerCase())).length > 0 ? (
+                  <span className="hidden sm:inline-flex items-center gap-1 text-[10px] font-extrabold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300 px-2 py-0.5 rounded-full border border-emerald-200/50">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
+                    {userList.filter((u) => u.isOnline || (currentUser && u.username.toLowerCase() === currentUser.username.toLowerCase())).length} Online
+                  </span>
+                ) : (
+                  <span className="hidden sm:inline-flex text-[10px] text-slate-400 font-medium">
+                    {userList.length} User
+                  </span>
+                )}
               </button>
             )}
 
@@ -1099,15 +1214,6 @@ export default function App() {
               alerts={alerts}
               setAlerts={setAlerts}
             />
-
-            {/* Dev Reset Seed Tool */}
-            <button
-              onClick={handleResetData}
-              className="text-xs bg-slate-100 dark:bg-slate-800 hover:bg-red-50 dark:hover:bg-red-950/30 hover:text-red-600 border border-transparent hover:border-red-200 px-3.5 py-2.5 rounded-xl font-bold tracking-wide transition-all cursor-pointer text-slate-600 dark:text-slate-300"
-              title="Reset Data Keuangan"
-            >
-              Reset Data
-            </button>
 
             {/* Logout Button */}
             <button
@@ -1141,6 +1247,7 @@ export default function App() {
             setProjects={setProjects}
             transactions={transactions}
             setTransactions={setTransactions}
+            activities={activities}
             onAddActivity={addActivity}
             isReadOnly={isTabReadOnly("projects", userRole)}
           />
@@ -1231,6 +1338,10 @@ export default function App() {
             setProjects={setProjects}
             transactions={transactions}
             setTransactions={setTransactions}
+            activities={activities}
+            setActivities={setActivities}
+            categories={categories}
+            setCategories={setCategories}
             setAppToast={setAppToast}
           />
         )}
@@ -1301,207 +1412,365 @@ export default function App() {
 
       {/* USER MANAGEMENT MODAL */}
       {showUserMgmtModal && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[990] flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white rounded-3xl max-w-4xl w-full shadow-2xl overflow-hidden border border-gray-100 flex flex-col md:flex-row max-h-[90vh] md:max-h-[80vh] animate-in fade-in zoom-in-95 duration-200">
-            
-            {/* Left side: Form to Add/Edit User */}
-            <div className="w-full md:w-5/12 bg-slate-50 p-6 border-r border-gray-100 flex flex-col justify-between overflow-y-auto">
-              <div>
-                <div className="flex items-center gap-2 mb-4">
-                  <div className="p-2 bg-blue-100 text-blue-600 rounded-xl">
-                    <UserPlus className="w-5 h-5" />
-                  </div>
+        (() => {
+          const isMgmtReadOnly = userRole !== "admin" && userRole !== "karyawan";
+          return (
+            <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[990] flex items-center justify-center p-4 overflow-y-auto">
+              <div className="bg-white rounded-3xl max-w-4xl w-full shadow-2xl overflow-hidden border border-gray-100 flex flex-col md:flex-row max-h-[90vh] md:max-h-[80vh] animate-in fade-in zoom-in-95 duration-200">
+                
+                {/* Left side: Form to Add/Edit User OR Read-Only Banner */}
+                <div className="w-full md:w-5/12 bg-slate-50 p-6 border-r border-gray-100 flex flex-col justify-between overflow-y-auto">
                   <div>
-                    <h3 className="text-sm font-extrabold text-gray-900 uppercase tracking-wide">
-                      {mgmtEditingUser ? "Edit Akun Karyawan" : "Tambah Karyawan Baru"}
-                    </h3>
-                    <p className="text-[10px] text-gray-500 font-medium">Isi detail akun untuk login bersamaan</p>
-                  </div>
-                </div>
-
-                <form onSubmit={handleSaveUser} className="space-y-4">
-                  {mgmtError && (
-                    <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-600 flex items-center gap-1.5 font-medium">
-                      <AlertTriangle className="w-4 h-4 shrink-0" />
-                      <span>{mgmtError}</span>
+                    <div className="flex items-center gap-2 mb-4">
+                      <div className={`p-2 rounded-xl ${isMgmtReadOnly ? "bg-amber-100 text-amber-600" : "bg-blue-100 text-blue-600"}`}>
+                        {isMgmtReadOnly ? <Lock className="w-5 h-5" /> : <UserPlus className="w-5 h-5" />}
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-extrabold text-gray-900 uppercase tracking-wide">
+                          {isMgmtReadOnly
+                            ? "Status Karyawan (ReadOnly)"
+                            : mgmtEditingUser
+                            ? "Edit Akun Karyawan"
+                            : "Tambah Karyawan Baru"}
+                        </h3>
+                        <p className="text-[10px] text-gray-500 font-medium">
+                          {isMgmtReadOnly
+                            ? "Informasi hak akses akun pengguna"
+                            : "Isi detail akun untuk login bersamaan"}
+                        </p>
+                      </div>
                     </div>
-                  )}
 
-                  {mgmtSuccess && (
-                    <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-600 flex items-center gap-1.5 font-medium animate-pulse">
-                      <CheckCircle2 className="w-4 h-4 shrink-0" />
-                      <span>{mgmtSuccess}</span>
-                    </div>
-                  )}
+                    {isMgmtReadOnly ? (
+                      <div className="space-y-4">
+                        <div className="p-4 bg-amber-50/90 border border-amber-200/80 rounded-2xl text-amber-900 space-y-2.5 shadow-xs">
+                          <div className="flex items-center gap-2 font-bold text-xs uppercase tracking-wide text-amber-800">
+                            <Lock className="w-4 h-4 text-amber-600 shrink-0" />
+                            <span>Akses Read-Only ({getRoleLabel(userRole)})</span>
+                          </div>
+                          <p className="text-xs text-amber-800/90 leading-relaxed font-medium">
+                            Sebagai <strong>{getRoleLabel(userRole)}</strong>, Anda memiliki hak akses <strong>Read-Only</strong> untuk memantau daftar dan status login karyawan secara real-time.
+                          </p>
+                          <p className="text-[11px] text-amber-700/80 font-sans border-t border-amber-200/60 pt-2">
+                            Pendaftaran, perubahan role, dan penghapusan akun karyawan hanya dapat dilakukan oleh Admin.
+                          </p>
+                        </div>
+                      </div>
+                    ) : (
+                      <form onSubmit={handleSaveUser} className="space-y-4">
+                        {mgmtError && (
+                          <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-600 flex items-center gap-1.5 font-medium">
+                            <AlertTriangle className="w-4 h-4 shrink-0" />
+                            <span>{mgmtError}</span>
+                          </div>
+                        )}
 
-                  <div>
-                    <label className="block text-[10px] font-bold text-gray-700 uppercase tracking-wider mb-1">Username (ID Login)</label>
-                    <input
-                      type="text"
-                      placeholder="Contoh: budi, roni"
-                      value={mgmtUsername}
-                      onChange={(e) => setMgmtUsername(e.target.value.toLowerCase().replace(/\s+/g, ""))}
-                      disabled={mgmtEditingUser !== null}
-                      className="w-full bg-white border border-gray-200 disabled:bg-gray-100 disabled:text-gray-400 rounded-xl px-3.5 py-2 text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none transition-all font-semibold"
-                      required
-                    />
-                  </div>
+                        {mgmtSuccess && (
+                          <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-600 flex items-center gap-1.5 font-medium">
+                            <CheckCircle2 className="w-4 h-4 shrink-0" />
+                            <span>{mgmtSuccess}</span>
+                          </div>
+                        )}
 
-                  <div>
-                    <label className="block text-[10px] font-bold text-gray-700 uppercase tracking-wider mb-1">Nama Lengkap (PIC)</label>
-                    <input
-                      type="text"
-                      placeholder="Nama lengkap PIC"
-                      value={mgmtFullName}
-                      onChange={(e) => setMgmtFullName(e.target.value)}
-                      className="w-full bg-white border border-gray-200 rounded-xl px-3.5 py-2 text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none transition-all font-semibold"
-                      required
-                    />
-                  </div>
+                        <div>
+                          <label className="block text-[10px] font-bold text-gray-700 uppercase tracking-wider mb-1">Username (ID Login)</label>
+                          <input
+                            type="text"
+                            placeholder="Contoh: budi, roni"
+                            value={mgmtUsername}
+                            onChange={(e) => setMgmtUsername(e.target.value.toLowerCase().replace(/\s+/g, ""))}
+                            disabled={mgmtEditingUser !== null}
+                            className="w-full bg-white border border-gray-200 disabled:bg-gray-100 disabled:text-gray-400 rounded-xl px-3.5 py-2 text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none transition-all font-semibold"
+                            required
+                          />
+                        </div>
 
-                  <div>
-                    <label className="block text-[10px] font-bold text-gray-700 uppercase tracking-wider mb-1">Hak Akses (Role)</label>
-                    <select
-                      value={mgmtRole}
-                      onChange={(e) => setMgmtRole(e.target.value)}
-                      className="w-full bg-white border border-gray-200 rounded-xl px-3.5 py-2 text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none transition-all font-bold cursor-pointer"
-                    >
-                      <option value="admin">Admin (Akses Penuh)</option>
-                      <option value="finance">Finance (Keuangan &amp; Slip Gaji)</option>
-                      <option value="project_manager">Project Manager (Manajemen Proyek &amp; PO)</option>
-                      <option value="direktur">Direktur / User (Akses ReadOnly)</option>
-                    </select>
-                  </div>
+                        <div>
+                          <label className="block text-[10px] font-bold text-gray-700 uppercase tracking-wider mb-1">Nama Lengkap (PIC)</label>
+                          <input
+                            type="text"
+                            placeholder="Nama lengkap PIC"
+                            value={mgmtFullName}
+                            onChange={(e) => setMgmtFullName(e.target.value)}
+                            className="w-full bg-white border border-gray-200 rounded-xl px-3.5 py-2 text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none transition-all font-semibold"
+                            required
+                          />
+                        </div>
 
-                  <div>
-                    <label className="block text-[10px] font-bold text-gray-700 uppercase tracking-wider mb-1">
-                      {mgmtEditingUser ? "Password Baru (Kosongkan jika tetap)" : "Password"}
-                    </label>
-                    <input
-                      type="password"
-                      placeholder={mgmtEditingUser ? "Tetap rahasia jika kosong" : "Masukkan password baru"}
-                      value={mgmtPassword}
-                      onChange={(e) => setMgmtPassword(e.target.value)}
-                      className="w-full bg-white border border-gray-200 rounded-xl px-3.5 py-2 text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none transition-all font-mono"
-                      required={!mgmtEditingUser}
-                    />
-                  </div>
+                        <div>
+                          <label className="block text-[10px] font-bold text-gray-700 uppercase tracking-wider mb-1">Hak Akses (Role)</label>
+                          <select
+                            value={mgmtRole}
+                            onChange={(e) => setMgmtRole(e.target.value)}
+                            className="w-full bg-white border border-gray-200 rounded-xl px-3.5 py-2 text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none transition-all font-bold cursor-pointer"
+                          >
+                            <option value="admin">Admin (Akses Penuh)</option>
+                            <option value="finance">Finance (Keuangan &amp; Slip Gaji)</option>
+                            <option value="project_manager">Project Manager (Manajemen Proyek &amp; PO)</option>
+                            <option value="direktur">Direktur / User (Akses ReadOnly)</option>
+                          </select>
+                        </div>
 
-                  <div className="flex gap-2 pt-2">
-                    <button
-                      type="submit"
-                      className="flex-1 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs transition-all cursor-pointer text-center"
-                    >
-                      {mgmtEditingUser ? "Simpan Perubahan" : "Daftarkan Pengguna"}
-                    </button>
-                    {mgmtEditingUser && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setMgmtUsername("");
-                          setMgmtFullName("");
-                          setMgmtPassword("");
-                          setMgmtRole("karyawan");
-                          setMgmtEditingUser(null);
-                          setMgmtError(null);
-                          setMgmtSuccess(null);
-                        }}
-                        className="px-3.5 py-2.5 bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold rounded-xl text-xs transition-all cursor-pointer"
-                      >
-                        Batal
-                      </button>
+                        <div>
+                          <label className="block text-[10px] font-bold text-gray-700 uppercase tracking-wider mb-1">
+                            {mgmtEditingUser ? "Password Baru (Kosongkan jika tetap)" : "Password"}
+                          </label>
+                          <input
+                            type="password"
+                            placeholder={mgmtEditingUser ? "Tetap rahasia jika kosong" : "Masukkan password baru"}
+                            value={mgmtPassword}
+                            onChange={(e) => setMgmtPassword(e.target.value)}
+                            className="w-full bg-white border border-gray-200 rounded-xl px-3.5 py-2 text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none transition-all font-mono"
+                            required={!mgmtEditingUser}
+                          />
+                        </div>
+
+                        <div className="flex gap-2 pt-2">
+                          <button
+                            type="submit"
+                            className="flex-1 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs transition-all cursor-pointer text-center"
+                          >
+                            {mgmtEditingUser ? "Simpan Perubahan" : "Daftarkan Pengguna"}
+                          </button>
+                          {mgmtEditingUser && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setMgmtUsername("");
+                                setMgmtFullName("");
+                                setMgmtPassword("");
+                                setMgmtRole("karyawan");
+                                setMgmtEditingUser(null);
+                                setMgmtError(null);
+                                setMgmtSuccess(null);
+                              }}
+                              className="px-3.5 py-2.5 bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold rounded-xl text-xs transition-all cursor-pointer"
+                            >
+                              Batal
+                            </button>
+                          )}
+                        </div>
+                      </form>
                     )}
                   </div>
-                </form>
-              </div>
 
-              <div className="mt-6 pt-4 border-t border-gray-200/60 text-[10px] text-gray-400 font-medium font-sans">
-                Setiap akun yang didaftarkan akan tersinkronisasi secara real-time ke semua komputer karyawan yang sedang aktif.
-              </div>
-            </div>
-
-            {/* Right side: Table showing registered users */}
-            <div className="w-full md:w-7/12 p-6 flex flex-col justify-between overflow-hidden">
-              <div className="flex flex-col h-full overflow-hidden">
-                <div className="flex justify-between items-center mb-4">
-                  <h3 className="text-xs font-extrabold text-slate-900 uppercase tracking-wide flex items-center gap-1.5">
-                    <Users className="w-4 h-4 text-slate-500" /> Daftar Pengguna Terdaftar ({userList.length})
-                  </h3>
-                  <button
-                    type="button"
-                    onClick={() => setShowUserMgmtModal(false)}
-                    className="p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-colors cursor-pointer"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
+                  <div className="mt-6 pt-4 border-t border-gray-200/60 text-[10px] text-gray-400 font-medium font-sans">
+                    Setiap akun yang didaftarkan akan tersinkronisasi secara real-time ke semua komputer karyawan yang sedang aktif.
+                  </div>
                 </div>
 
-                <div className="overflow-y-auto flex-1 border border-gray-100 rounded-2xl">
-                  <table className="w-full text-left border-collapse">
-                    <thead>
-                      <tr className="bg-slate-50 border-b border-gray-100 text-[10px] font-bold text-gray-500 uppercase tracking-wider">
-                        <th className="px-4 py-3">Nama PIC</th>
-                        <th className="px-4 py-3">Username</th>
-                        <th className="px-4 py-3">Role</th>
-                        <th className="px-4 py-3 text-right">Aksi</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100 text-xs">
-                      {userList.map((u) => (
-                        <tr key={u.username} className="hover:bg-slate-50/50 transition-colors">
-                          <td className="px-4 py-3 font-semibold text-gray-900">{u.fullName}</td>
-                          <td className="px-4 py-3 font-mono text-gray-600 font-medium">{u.username}</td>
-                          <td className="px-4 py-3">
-                            <span className={`inline-flex px-2 py-0.5 rounded-full text-[9px] font-bold ${
-                              u.role === "direktur" || u.role === "user"
-                                ? "bg-indigo-50 text-indigo-700 border border-indigo-100"
-                                : "bg-blue-50 text-blue-700 border border-blue-100"
-                            }`}>
-                              {getRoleLabel(u.role)}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-right">
-                            <div className="inline-flex gap-1.5 justify-end">
-                              <button
-                                type="button"
-                                onClick={() => handleEditUserClick(u)}
-                                className="text-[10px] font-bold text-blue-600 hover:text-blue-800 hover:bg-blue-50 px-2 py-1 rounded transition-colors cursor-pointer"
-                              >
-                                Edit
-                              </button>
-                              {u.username !== "admin" && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleDeleteUser(u.username)}
-                                  className="text-[10px] font-bold text-red-600 hover:text-red-800 hover:bg-red-50 px-2 py-1 rounded transition-colors cursor-pointer"
-                                >
-                                  Hapus
-                                </button>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+                {/* Right side: Table showing registered & online users */}
+                <div className="w-full md:w-7/12 p-6 flex flex-col justify-between overflow-hidden bg-white">
+                  <div className="flex flex-col h-full overflow-hidden">
+                    {/* Header title & close button */}
+                    <div className="flex justify-between items-center mb-3">
+                      <div>
+                        <h3 className="text-xs font-extrabold text-slate-900 uppercase tracking-wide flex items-center gap-1.5">
+                          <Users className="w-4 h-4 text-blue-600" /> Kelola &amp; Status Karyawan
+                        </h3>
+                        <p className="text-[10px] text-slate-500 font-medium">
+                          Monitoring karyawan yang sedang login/online secara real-time
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setShowUserMgmtModal(false)}
+                        className="p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-colors cursor-pointer"
+                      >
+                        <X className="w-5 h-5" />
+                      </button>
+                    </div>
 
-              <div className="bg-gray-50 p-3 mt-4 rounded-2xl flex items-center justify-between text-[10px] text-gray-500 border border-gray-100 font-sans">
-                <span>Catatan: Akun default <b>admin</b> tidak dapat dihapus.</span>
+                    {/* Status Summary Banner */}
+                    <div className="grid grid-cols-3 gap-2 mb-3">
+                      <div className="bg-slate-50 p-2.5 rounded-2xl border border-slate-100 flex flex-col">
+                        <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Total User</span>
+                        <span className="text-base font-extrabold text-slate-800">{userList.length}</span>
+                      </div>
+                      <div className="bg-emerald-50/80 p-2.5 rounded-2xl border border-emerald-100 flex flex-col">
+                        <span className="text-[9px] font-bold text-emerald-700 uppercase tracking-wider flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
+                          Sedang Login
+                        </span>
+                        <span className="text-base font-extrabold text-emerald-700">
+                          {userList.filter((u) => u.isOnline || (currentUser && u.username.toLowerCase() === currentUser.username.toLowerCase())).length} Online
+                        </span>
+                      </div>
+                      <div className="bg-slate-50 p-2.5 rounded-2xl border border-slate-100 flex flex-col">
+                        <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Offline</span>
+                        <span className="text-base font-extrabold text-slate-600">
+                          {Math.max(
+                            0,
+                            userList.length -
+                              userList.filter((u) => u.isOnline || (currentUser && u.username.toLowerCase() === currentUser.username.toLowerCase())).length
+                          )}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Filter tabs & Search bar */}
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 mb-3">
+                      {/* Status filter tabs */}
+                      <div className="flex bg-slate-100 p-0.5 rounded-xl text-[10px] font-bold">
+                        <button
+                          type="button"
+                          onClick={() => setUserFilterStatus("all")}
+                          className={`px-3 py-1 rounded-lg transition-all cursor-pointer ${
+                            userFilterStatus === "all" ? "bg-white text-slate-900 shadow-xs" : "text-slate-500 hover:text-slate-800"
+                          }`}
+                        >
+                          Semua ({userList.length})
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setUserFilterStatus("online")}
+                          className={`px-3 py-1 rounded-lg transition-all cursor-pointer flex items-center gap-1 ${
+                            userFilterStatus === "online" ? "bg-emerald-600 text-white shadow-xs" : "text-emerald-700 hover:text-emerald-800"
+                          }`}
+                        >
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block" />
+                          Online ({userList.filter((u) => u.isOnline || (currentUser && u.username.toLowerCase() === currentUser.username.toLowerCase())).length})
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setUserFilterStatus("offline")}
+                          className={`px-3 py-1 rounded-lg transition-all cursor-pointer ${
+                            userFilterStatus === "offline" ? "bg-white text-slate-900 shadow-xs" : "text-slate-500 hover:text-slate-800"
+                          }`}
+                        >
+                          Offline ({Math.max(0, userList.length - userList.filter((u) => u.isOnline || (currentUser && u.username.toLowerCase() === currentUser.username.toLowerCase())).length)})
+                        </button>
+                      </div>
+
+                      {/* Search query */}
+                      <input
+                        type="text"
+                        placeholder="Cari karyawan..."
+                        value={userSearchQuery}
+                        onChange={(e) => setUserSearchQuery(e.target.value)}
+                        className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 w-full sm:w-36 font-medium"
+                      />
+                    </div>
+
+                    {/* Users Table */}
+                    <div className="overflow-y-auto flex-1 border border-gray-100 rounded-2xl">
+                      <table className="w-full text-left border-collapse">
+                        <thead>
+                          <tr className="bg-slate-50 border-b border-gray-100 text-[10px] font-bold text-gray-500 uppercase tracking-wider">
+                            <th className="px-3.5 py-2.5">Nama PIC / Karyawan</th>
+                            <th className="px-3.5 py-2.5">Username</th>
+                            <th className="px-3.5 py-2.5">Status Login</th>
+                            <th className="px-3.5 py-2.5">Role</th>
+                            <th className="px-3.5 py-2.5 text-right">{isMgmtReadOnly ? "Status Akses" : "Aksi"}</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100 text-xs">
+                          {userList
+                            .filter((u) => {
+                              const isOnline = Boolean(u.isOnline || (currentUser && u.username.toLowerCase() === currentUser.username.toLowerCase()));
+                              if (userFilterStatus === "online" && !isOnline) return false;
+                              if (userFilterStatus === "offline" && isOnline) return false;
+                              if (userSearchQuery.trim()) {
+                                const q = userSearchQuery.toLowerCase().trim();
+                                const m1 = u.fullName.toLowerCase().includes(q);
+                                const m2 = u.username.toLowerCase().includes(q);
+                                const m3 = u.role.toLowerCase().includes(q);
+                                if (!m1 && !m2 && !m3) return false;
+                              }
+                              return true;
+                            })
+                            .map((u) => {
+                              const isOnline = Boolean(u.isOnline || (currentUser && u.username.toLowerCase() === currentUser.username.toLowerCase()));
+                              const isMe = currentUser && u.username.toLowerCase() === currentUser.username.toLowerCase();
+                              return (
+                                <tr key={u.username} className="hover:bg-slate-50/60 transition-colors">
+                                  <td className="px-3.5 py-2.5">
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="font-semibold text-gray-900">{u.fullName}</span>
+                                      {isMe && (
+                                        <span className="text-[9px] bg-blue-100 text-blue-700 font-extrabold px-1.5 py-0.2 rounded-md">
+                                          Anda
+                                        </span>
+                                      )}
+                                    </div>
+                                  </td>
+                                  <td className="px-3.5 py-2.5 font-mono text-gray-600 font-medium text-[11px]">{u.username}</td>
+                                  <td className="px-3.5 py-2.5">
+                                    {isOnline ? (
+                                      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200/80">
+                                        <span className="relative flex h-2 w-2">
+                                          <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                                        </span>
+                                        Online
+                                      </span>
+                                    ) : (
+                                      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-100 text-slate-500 border border-slate-200">
+                                        <span className="h-1.5 w-1.5 rounded-full bg-slate-400"></span>
+                                        Offline
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td className="px-3.5 py-2.5">
+                                    <span
+                                      className={`inline-flex px-2 py-0.5 rounded-full text-[9px] font-bold ${
+                                        u.role === "direktur" || u.role === "user"
+                                          ? "bg-indigo-50 text-indigo-700 border border-indigo-100"
+                                          : "bg-blue-50 text-blue-700 border border-blue-100"
+                                      }`}
+                                    >
+                                      {getRoleLabel(u.role)}
+                                    </span>
+                                  </td>
+                                  <td className="px-3.5 py-2.5 text-right">
+                                    {isMgmtReadOnly ? (
+                                      <span className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-md justify-end ml-auto">
+                                        <Lock className="w-3 h-3 text-slate-400" /> ReadOnly
+                                      </span>
+                                    ) : (
+                                      <div className="inline-flex gap-1 justify-end">
+                                        <button
+                                          type="button"
+                                          onClick={() => handleEditUserClick(u)}
+                                          className="text-[10px] font-bold text-blue-600 hover:text-blue-800 hover:bg-blue-50 px-2 py-1 rounded transition-colors cursor-pointer"
+                                        >
+                                          Edit
+                                        </button>
+                                        {u.username !== "admin" && (
+                                          <button
+                                            type="button"
+                                            onClick={() => handleDeleteUser(u.username)}
+                                            className="text-[10px] font-bold text-red-600 hover:text-red-800 hover:bg-red-50 px-2 py-1 rounded transition-colors cursor-pointer"
+                                          >
+                                            Hapus
+                                          </button>
+                                        )}
+                                      </div>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+              <div className="bg-gray-50 p-3 mt-3 rounded-2xl flex items-center justify-between text-[10px] text-gray-500 border border-gray-100 font-sans">
+                <span>Indikator hijau menunjukkan karyawan yang saat ini sedang aktif membuka aplikasi.</span>
                 <button
                   type="button"
                   onClick={() => setShowUserMgmtModal(false)}
-                  className="px-4 py-2 bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 font-bold rounded-xl text-[10px] transition-all cursor-pointer shadow-sm"
+                  className="px-4 py-2 bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 font-bold rounded-xl text-[10px] transition-all cursor-pointer shadow-xs"
                 >
                   Tutup Panel
                 </button>
               </div>
             </div>
-
           </div>
         </div>
-      )}
+      );
+    })()
+  )}
 
       {/* APP TOAST NOTIFICATION */}
       {appToast && (

@@ -4,10 +4,12 @@
  */
 
 import React from "react";
+import jsPDF from "jspdf";
 import { Project, Transaction, Category, ProjectStatus } from "../types";
 import { COMPANY_INFO } from "../data";
-import { Plus, ListFilter, Search, FileText, ShoppingBag, Trash2, HelpCircle, AlertTriangle, ShieldCheck, Landmark, Briefcase, Percent, CheckCircle2, Coins, Edit } from "lucide-react";
+import { Plus, ListFilter, Search, FileText, ShoppingBag, Trash2, HelpCircle, AlertTriangle, ShieldCheck, Landmark, Briefcase, Percent, CheckCircle2, Coins, Edit, Download } from "lucide-react";
 import { motion } from "motion/react";
+import PdfViewerModal from "./PdfViewerModal";
 
 interface PurchaseOrderManagerProps {
   projects: Project[];
@@ -49,6 +51,12 @@ export default function PurchaseOrderManager({
   const [pic, setPic] = React.useState("");
   const [date, setDate] = React.useState(new Date().toISOString().split("T")[0]);
 
+  // PDF Upload states
+  const [pdfFileBase64, setPdfFileBase64] = React.useState<string | null>(null);
+  const [pdfFileName, setPdfFileName] = React.useState<string | null>(null);
+  const [isDragging, setIsDragging] = React.useState(false);
+  const [selectedPdfPreview, setSelectedPdfPreview] = React.useState<{ name: string; data: string } | null>(null);
+
   // Sync with selected existing project
   React.useEffect(() => {
     if (isRestoringRef.current || editingPoId) return;
@@ -59,7 +67,9 @@ export default function PurchaseOrderManager({
         setProjectCode(foundProj.code);
         setPic(foundProj.pic || foundProj.manager || "");
         setCompany(foundProj.company || "CV. Mandiri Cipta Jaya");
-        setPphPercentInput(foundProj.pphPercent ?? 4);
+        const isHoOrEjt = foundProj.name.toUpperCase().includes("HO") || (foundProj.code && foundProj.code.toUpperCase().includes("HO")) || foundProj.name.toUpperCase().includes("EJT");
+        setPpnPercentInput(foundProj.ppnPercent !== undefined ? foundProj.ppnPercent : (isHoOrEjt ? 0 : 11));
+        setPphPercentInput(foundProj.pphPercent !== undefined ? foundProj.pphPercent : (isHoOrEjt ? 0 : 4));
         
         // Populate contract items for the NEW PO - starting at 0 so they can enter the new PO's nominal values
         let items = [];
@@ -108,7 +118,23 @@ export default function PurchaseOrderManager({
 
   const [company, setCompany] = React.useState("CV. Mandiri Cipta Jaya");
   const [customCompany, setCustomCompany] = React.useState("");
+  const [ppnPercentInput, setPpnPercentInput] = React.useState<number>(11);
   const [pphPercentInput, setPphPercentInput] = React.useState<number>(4);
+
+  // HO Cut automatic / manual settings
+  const [applyHoCut, setApplyHoCut] = React.useState(true);
+  const [hoPercent, setHoPercent] = React.useState(2);
+  const [hoCutValue, setHoCutValue] = React.useState(0);
+
+  const rawContractSum = contractItems.reduce((sum, item) => sum + Number(item.value || 0), 0);
+
+  React.useEffect(() => {
+    if (applyHoCut) {
+      setHoCutValue(Math.round(rawContractSum * (hoPercent / 100)));
+    } else {
+      setHoCutValue(0);
+    }
+  }, [rawContractSum, applyHoCut]);
 
   // Filter States
   const [filterProject, setFilterProject] = React.useState<string>("all");
@@ -150,6 +176,9 @@ export default function PurchaseOrderManager({
           if (draft.customCompany) setCustomCompany(draft.customCompany);
           if (draft.pphPercentInput !== undefined) setPphPercentInput(draft.pphPercentInput);
           if (draft.showAddForm !== undefined) setShowAddForm(draft.showAddForm);
+          if (draft.applyHoCut !== undefined) setApplyHoCut(draft.applyHoCut);
+          if (draft.hoPercent !== undefined) setHoPercent(draft.hoPercent);
+          if (draft.hoCutValue !== undefined) setHoCutValue(draft.hoCutValue);
           setTimeout(() => {
             isRestoringRef.current = false;
           }, 100);
@@ -176,7 +205,10 @@ export default function PurchaseOrderManager({
       company,
       customCompany,
       pphPercentInput,
-      showAddForm
+      showAddForm,
+      applyHoCut,
+      hoPercent,
+      hoCutValue
     };
     localStorage.setItem("purchase_order_draft", JSON.stringify(draft));
   }, [
@@ -194,6 +226,9 @@ export default function PurchaseOrderManager({
     customCompany,
     pphPercentInput,
     showAddForm,
+    applyHoCut,
+    hoPercent,
+    hoCutValue,
     editingPoId
   ]);
 
@@ -203,6 +238,73 @@ export default function PurchaseOrderManager({
       currency: "IDR",
       maximumFractionDigits: 0,
     }).format(val);
+  };
+
+  const handleFileSelect = (file: File) => {
+    if (file.type !== "application/pdf") {
+      setValidationError("File harus berformat PDF!");
+      return;
+    }
+    if (file.size > 15 * 1024 * 1024) {
+      setValidationError("Ukuran file PDF maksimal adalah 15MB!");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      if (e.target?.result && typeof e.target.result === "string") {
+        setPdfFileBase64(e.target.result);
+        setPdfFileName(file.name);
+        setValidationError(null);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const generateDummyPdf = (name: string) => {
+    try {
+      const totalVal = contractItems.reduce((acc, curr) => acc + (curr.value || 0), 0);
+      const doc = new jsPDF();
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(16);
+      doc.text("CV. MANDIRI CIPTA JAYA", 20, 20);
+      doc.setFontSize(12);
+      doc.setFont("helvetica", "bold");
+      doc.text("DOKUMEN PURCHASE ORDER (PO)", 20, 30);
+      doc.setLineWidth(0.5);
+      doc.line(20, 33, 190, 33);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.text(`Nomor PO: ${poNo || "MCJ-PO-2026-001"}`, 20, 43);
+      doc.text(`Tanggal: ${date || new Date().toISOString().split("T")[0]}`, 20, 50);
+      doc.text(`Supplier / Vendor: ${supplier || "PT. Supplier Utama"}`, 20, 57);
+      doc.text(`Project: ${projectName || "Project General"}`, 20, 64);
+      doc.text(`Total Nilai PO: Rp ${(totalVal || 0).toLocaleString("id-ID")}`, 20, 71);
+      doc.text("Status: RESMI TERVERIFIKASI SISTEM", 20, 78);
+
+      doc.setFont("helvetica", "bold");
+      doc.text("Rincian Pekerjaan / Material PO:", 20, 90);
+      doc.setFont("helvetica", "normal");
+
+      let y = 98;
+      if (contractItems && contractItems.length > 0) {
+        contractItems.forEach((item, idx) => {
+          doc.text(`${idx + 1}. ${item.name || "Item Material/Jasa"}: Rp ${(item.value || 0).toLocaleString("id-ID")}`, 25, y);
+          y += 7;
+        });
+      } else {
+        doc.text("1. Pembelian Material & Jasa Konstruksi Lapangan", 25, y);
+        y += 7;
+      }
+
+      doc.setFontSize(8);
+      doc.text("Dokumen ini dihasilkan secara otomatis dan dapat diverifikasi oleh CV. Mandiri Cipta Jaya.", 20, y + 20);
+
+      const pdfDataUri = doc.output("datauristring");
+      setPdfFileBase64(pdfDataUri);
+      setPdfFileName(name);
+    } catch (e) {
+      console.error("jsPDF generation error:", e);
+    }
   };
 
   const handleAddContractItem = () => {
@@ -358,7 +460,7 @@ export default function PurchaseOrderManager({
     const targetProjectId = linkProjectId === "new" ? (oldPO ? oldPO.projectId : `proj-${Date.now()}`) : linkProjectId;
     const updatedCompany = company === "Lainnya" ? customCompany : company;
 
-    const cutAmount = Math.round(totalContractValue * 0.02);
+    const cutAmount = applyHoCut ? hoCutValue : 0;
     const finalPoAmount = totalContractValue - cutAmount;
     const targetPoId = editingPoId ? editingPoId : `po-${Date.now()}`;
 
@@ -369,23 +471,37 @@ export default function PurchaseOrderManager({
       targetHoProj = projectsTemp.find((p) => p.name.toUpperCase().trim() === "HO EJT" || p.code.toUpperCase().trim() === "HO.EJT.2026");
     }
 
-    let hoTx: Transaction | null = null;
+    // Allocate the HO Cut as Contract Value (Nilai Kontrak) of the HO project instead of an Invoice transaction
     if (targetHoProj) {
-      hoTx = {
-        id: `po-ho-cut-${targetPoId}`,
-        projectId: targetHoProj.id,
-        type: "Invoice",
-        pic: pic || "Sistem Otomatis",
-        date: date,
-        invoiceNo: `HO-2%-${poNo}`,
-        poNo: poNo,
-        status: "Sudah Proses",
-        description: `Penerimaan Dana 2% dari PO ${poNo} - ${description}`,
-        category: "Dana 2%",
-        amount: cutAmount,
-        company: updatedCompany,
-      };
+      projectsTemp = projectsTemp.map((proj) => {
+        if (proj.id === targetHoProj!.id) {
+          let existingItems = proj.customContractItems ? [...proj.customContractItems] : [];
+          
+          // Remove old cut item from this PO (if editing or previously added)
+          existingItems = existingItems.filter(
+            (item) => item.id !== `ho-cut-${targetPoId}` && item.id !== `ho-cut-${editingPoId}`
+          );
+
+          // If there is an active HO cut, push the new value
+          if (cutAmount > 0) {
+            existingItems.push({
+              id: `ho-cut-${targetPoId}`,
+              name: `Potongan HO ${hoPercent}% PO ${poNo}`,
+              value: cutAmount
+            });
+          }
+
+          return {
+            ...proj,
+            customContractItems: existingItems
+          };
+        }
+        return proj;
+      });
     }
+
+    // We do NOT create any Invoice transactions for HO. It is purely mapped to the HO project's Nilai Kontrak.
+    const hoTx = null;
 
     // Apply new values to target project
     if (linkProjectId === "new") {
@@ -442,7 +558,7 @@ export default function PurchaseOrderManager({
             scafolder: scafolderItem?.name || "Scafolder",
             welder: welderItem?.name || "Welder",
           },
-          ppnPercent: 11,
+          ppnPercent: ppnPercentInput,
           pphPercent: pphPercentInput,
           budgetThresholdPercent: 85,
           notes: description,
@@ -512,6 +628,8 @@ export default function PurchaseOrderManager({
             pic: pic || proj.pic || proj.manager,
             company: updatedCompany,
             poNo: updatedPoNo,
+            ppnPercent: ppnPercentInput,
+            pphPercent: pphPercentInput,
             customContractItems: mergedItems,
             contractValue: {
               piping: pipingVal,
@@ -528,6 +646,8 @@ export default function PurchaseOrderManager({
 
     setProjects(projectsTemp);
 
+    const finalTransferProof = pdfFileBase64 ? JSON.stringify({ name: pdfFileName, data: pdfFileBase64 }) : "";
+
     if (editingPoId) {
       setTransactions((prev) => {
         const filtered = prev.filter((t) => t.id !== `po-ho-cut-${editingPoId}`);
@@ -541,10 +661,11 @@ export default function PurchaseOrderManager({
               poNo: poNo,
               supplier: supplier,
               status: status,
-              description: `Owner PO - ${description} (Potongan 2% HO)`,
+              description: `Owner PO - ${description}${applyHoCut ? ` (Potongan HO ${hoPercent}%)` : ""}`,
               amount: finalPoAmount,
               contractItems: contractItems,
               company: updatedCompany,
+              transferProof: finalTransferProof || undefined,
             };
           }
           return t;
@@ -564,11 +685,12 @@ export default function PurchaseOrderManager({
         poNo: poNo,
         supplier: supplier,
         status: status,
-        description: `Owner PO - ${description} (Potongan 2% HO)`,
+        description: `Owner PO - ${description}${applyHoCut ? ` (Potongan HO ${hoPercent}%)` : ""}`,
         category: "Material",
         amount: finalPoAmount,
         contractItems: contractItems,
         company: updatedCompany,
+        transferProof: finalTransferProof || undefined,
       };
       setTransactions((prev) => {
         const base = [newPO, ...prev];
@@ -587,17 +709,17 @@ export default function PurchaseOrderManager({
         "po",
         editingPoId ? "Material PO Diperbarui" : "Material PO Tersimpan",
         editingPoId 
-          ? `Memperbarui Purchase Order [${poNo}] senilai ${displayAmt} (Potongan 2% HO: ${displayCut}) untuk proyek "${proj ? proj.name : (projectName || "Proyek")}"`
-          : `Menginput Purchase Order baru [${poNo}] senilai ${displayAmt} (Potongan 2% HO: ${displayCut}) untuk proyek "${proj ? proj.name : (projectName || "Proyek Baru")}"`,
+          ? `Memperbarui Purchase Order [${poNo}] senilai ${displayAmt}${applyHoCut ? ` (Potongan HO ${hoPercent}%: ${displayCut})` : ""} untuk proyek "${proj ? proj.name : (projectName || "Proyek")}"`
+          : `Menginput Purchase Order baru [${poNo}] senilai ${displayAmt}${applyHoCut ? ` (Potongan HO ${hoPercent}%: ${displayCut})` : ""} untuk proyek "${proj ? proj.name : (projectName || "Proyek Baru")}"`,
         pic || "Administrator",
         targetProjectId
       );
 
-      if (targetHoProj) {
+      if (targetHoProj && cutAmount > 0) {
         onAddActivity(
-          "po",
-          "Dana 2% Terbuku",
-          `Penerimaan Dana 2% otomatis dari PO [${poNo}] senilai ${displayCut} untuk Project ${targetHoProj.name}`,
+          "project",
+          "Nilai Kontrak HO Ditambah",
+          `Alokasi Nilai Kontrak HO otomatis dari PO [${poNo}] sebesar ${displayCut} (${hoPercent}%) untuk Project ${targetHoProj.name}`,
           "Sistem Otomatis",
           targetHoProj.id
         );
@@ -622,9 +744,15 @@ export default function PurchaseOrderManager({
     setStatus("Waiting PO");
     setCompany("CV. Mandiri Cipta Jaya");
     setCustomCompany("");
+    setPpnPercentInput(11);
     setPphPercentInput(4);
+    setApplyHoCut(true);
+    setHoPercent(2);
+    setHoCutValue(0);
     setEditingPoId(null);
     setShowAddForm(false);
+    setPdfFileBase64(null);
+    setPdfFileName(null);
     setAlertMessage(editingPoId ? `Purchase Order (PO) "${poNo}" berhasil diperbarui.` : `Purchase Order (PO) "${poNo}" berhasil dicatat.`);
   };
 
@@ -662,17 +790,58 @@ export default function PurchaseOrderManager({
         setCompany("CV. Mandiri Cipta Jaya");
         setCustomCompany("");
       }
-      setPphPercentInput(proj.pphPercent !== undefined ? proj.pphPercent : 4);
+      const isHoOrEjt = proj.name.toUpperCase().includes("HO") || (proj.code && proj.code.toUpperCase().includes("HO")) || proj.name.toUpperCase().includes("EJT");
+      setPpnPercentInput(proj.ppnPercent !== undefined ? proj.ppnPercent : (isHoOrEjt ? 0 : 11));
+      setPphPercentInput(proj.pphPercent !== undefined ? proj.pphPercent : (isHoOrEjt ? 0 : 4));
     } else {
       setProjectName("");
       setProjectCode("");
       setCompany("CV. Mandiri Cipta Jaya");
       setCustomCompany("");
+      setPpnPercentInput(11);
       setPphPercentInput(4);
     }
     
-    setDescription(po.description ? po.description.replace(/^Owner PO - /, "") : "");
+    setDescription(po.description ? po.description.replace(/^Owner PO - /, "").replace(/\s*\(Potongan HO \d+(\.\d+)?%\)$/, "") : "");
     setStatus(po.status || "Waiting PO");
+
+    if (po.transferProof) {
+      try {
+        const parsed = JSON.parse(po.transferProof);
+        if (parsed && parsed.data) {
+          setPdfFileBase64(parsed.data);
+          setPdfFileName(parsed.name || "dokumen.pdf");
+        } else {
+          setPdfFileBase64(po.transferProof);
+          setPdfFileName("dokumen.pdf");
+        }
+      } catch (e) {
+        setPdfFileBase64(po.transferProof);
+        setPdfFileName("dokumen.pdf");
+      }
+    } else {
+      setPdfFileBase64(null);
+      setPdfFileName(null);
+    }
+
+    // Check if there is an existing HO cut for this PO (either custom contract item in HO project or a legacy transaction)
+    const foundHoItem = projects.flatMap((p) => p.customContractItems || []).find((item) => item.id === `ho-cut-${po.id}`);
+    const foundHoTx = transactions.find((t) => t.id === `po-ho-cut-${po.id}`);
+
+    const savedCutAmount = foundHoItem ? foundHoItem.value : (foundHoTx ? Number(foundHoTx.amount) : 0);
+    const totalPOBruto = po.contractItems ? po.contractItems.reduce((sum, item) => sum + Number(item.value || 0), 0) : po.amount;
+
+    if (savedCutAmount > 0) {
+      setApplyHoCut(true);
+      setHoCutValue(savedCutAmount);
+      const calculatedPercent = totalPOBruto > 0 ? (savedCutAmount / totalPOBruto) * 100 : 2;
+      setHoPercent(Number(calculatedPercent.toFixed(2)));
+    } else {
+      setApplyHoCut(false);
+      setHoCutValue(0);
+      setHoPercent(2);
+    }
+
     setShowAddForm(true);
   };
 
@@ -690,11 +859,15 @@ export default function PurchaseOrderManager({
 
       setProjects((prevProjects) =>
         prevProjects.map((proj) => {
+          let updatedCustomItems = proj.customContractItems
+            ? proj.customContractItems.map((item) => ({ ...item }))
+            : [];
+          
+          // Clean up any HO cut custom item associated with this PO
+          updatedCustomItems = updatedCustomItems.filter((item) => item.id !== `ho-cut-${id}`);
+
           if (proj.id === projId) {
             // Subtract customContractItems
-            let updatedCustomItems = proj.customContractItems
-              ? proj.customContractItems.map((item) => ({ ...item }))
-              : [];
             itemsToSubtract.forEach((subItem) => {
               const match = updatedCustomItems.find(
                 (item) => item.name.toLowerCase().trim() === subItem.name.toLowerCase().trim()
@@ -748,7 +921,10 @@ export default function PurchaseOrderManager({
               },
             };
           }
-          return proj;
+          return {
+            ...proj,
+            customContractItems: updatedCustomItems
+          };
         })
       );
     }
@@ -816,6 +992,9 @@ export default function PurchaseOrderManager({
                 setDescription("");
                 setStatus("Waiting PO");
                 setPphPercentInput(4);
+                setApplyHoCut(true);
+                setHoPercent(2);
+                setHoCutValue(0);
                 setShowAddForm(true);
               }
             }}
@@ -994,14 +1173,26 @@ export default function PurchaseOrderManager({
                 </select>
               </div>
 
+              {/* PPN Selector */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-gray-700">Tingkat PPN Proyek</label>
+                <select
+                  value={ppnPercentInput}
+                  onChange={(e) => setPpnPercentInput(Number(e.target.value))}
+                  className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs focus:ring-1 focus:ring-blue-600 focus:bg-white text-emerald-700 font-bold"
+                >
+                  <option value={11}>PPN 11% (Standar)</option>
+                  <option value={0}>Tanpa PPN (0%)</option>
+                </select>
+              </div>
+
               {/* PPh Selector */}
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold text-gray-700">Tingkat PPh Proyek</label>
                 <select
                   value={pphPercentInput}
-                  disabled={linkProjectId !== "new"}
                   onChange={(e) => setPphPercentInput(Number(e.target.value))}
-                  className="w-full bg-gray-50 disabled:opacity-75 disabled:bg-gray-100 border border-gray-200 rounded-xl px-3 py-2 text-xs focus:ring-1 focus:ring-blue-600 focus:bg-white text-red-700 font-bold"
+                  className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs focus:ring-1 focus:ring-blue-600 focus:bg-white text-red-700 font-bold"
                 >
                   <option value={2}>PPh 2% (Jasa Konstruksi)</option>
                   <option value={4}>PPh 4% (Jasa Non-Konstruksi)</option>
@@ -1075,12 +1266,93 @@ export default function PurchaseOrderManager({
                 ))}
               </div>
 
+              {/* Pengaturan Potongan HO */}
+              <div className="bg-slate-50 p-4 rounded-xl border border-gray-200 mt-4 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Coins className="w-5 h-5 text-amber-500" />
+                    <div>
+                      <h4 className="text-xs font-bold text-gray-900 uppercase tracking-wider">
+                        Alokasi / Potongan HO (Head Office)
+                      </h4>
+                      <p className="text-[10px] text-gray-500">
+                        Tentukan apakah PO ini akan dipotong otomatis/manual untuk alokasi dana ke proyek HO.
+                      </p>
+                    </div>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={applyHoCut}
+                      onChange={(e) => setApplyHoCut(e.target.checked)}
+                      className="sr-only peer"
+                    />
+                    <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                    <span className="ml-2 text-xs font-semibold text-gray-700">Terapkan</span>
+                  </label>
+                </div>
+
+                {applyHoCut && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-dashed border-gray-200">
+                    <div className="space-y-1.5">
+                      <label className="text-[11px] font-bold text-gray-600">
+                        Persentase Potongan HO (%)
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          max="100"
+                          value={hoPercent}
+                          onChange={(e) => {
+                            const val = Number(e.target.value);
+                            setHoPercent(val);
+                            setHoCutValue(Math.round(rawContractSum * (val / 100)));
+                          }}
+                          className="w-full bg-white border border-gray-200 rounded-lg pl-3 pr-8 py-1.5 text-xs focus:ring-1 focus:ring-blue-600 focus:bg-white font-mono font-bold text-gray-800"
+                        />
+                        <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
+                          <span className="text-xs text-gray-400 font-bold">%</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-[11px] font-bold text-gray-600">
+                        Nilai Potongan HO (IDR)
+                      </label>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        placeholder="Contoh: 1.000.000"
+                        value={hoCutValue ? new Intl.NumberFormat("id-ID").format(hoCutValue) : ""}
+                        onChange={(e) => {
+                          const clean = e.target.value.replace(/\D/g, "");
+                          const val = clean ? Number(clean) : 0;
+                          setHoCutValue(val);
+                          if (rawContractSum > 0) {
+                            setHoPercent(Number(((val / rawContractSum) * 100).toFixed(2)));
+                          } else {
+                            setHoPercent(0);
+                          }
+                        }}
+                        className="w-full bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-xs focus:ring-1 focus:ring-blue-600 focus:bg-white font-mono font-bold text-gray-800"
+                      />
+                      <span className="text-[10px] text-gray-500 font-mono block">
+                        {formatIDR(hoCutValue)}
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {/* Total Display */}
               {(() => {
-                const rawContractSum = contractItems.reduce((sum, item) => sum + Number(item.value || 0), 0);
-                const calculatedPpn = rawContractSum * 0.11;
+                const calculatedPpn = rawContractSum * (ppnPercentInput / 100);
                 const calculatedPph = rawContractSum * (pphPercentInput / 100);
-                const calculatedNetto = rawContractSum + calculatedPpn - calculatedPph;
+                const calculatedHoCut = applyHoCut ? hoCutValue : 0;
+                const calculatedNetto = rawContractSum + calculatedPpn - calculatedPph - calculatedHoCut;
 
                 return (
                   <div className="bg-slate-50 p-4 rounded-xl border border-gray-200 mt-2 space-y-2 text-xs shadow-inner">
@@ -1091,10 +1363,10 @@ export default function PurchaseOrderManager({
                       </span>
                     </div>
                     <div className="flex items-center justify-between text-slate-500 text-[11px] border-b border-dashed border-gray-200 pb-2">
-                      <span>PPN (11%):</span>
+                      <span>PPN ({ppnPercentInput}%):</span>
                       <span className="font-mono text-emerald-600">+{formatIDR(calculatedPpn)}</span>
                     </div>
-                    <div className="flex items-center justify-between text-slate-500 text-[11px] border-b border-gray-200 pb-2">
+                    <div className="flex items-center justify-between text-slate-500 text-[11px] border-b border-dashed border-gray-200 pb-2">
                       <span className="font-semibold text-red-700">
                         Potongan PPh ({pphPercentInput}%):
                       </span>
@@ -1102,8 +1374,20 @@ export default function PurchaseOrderManager({
                         -{formatIDR(calculatedPph)}
                       </span>
                     </div>
+                    {applyHoCut && (
+                      <div className="flex items-center justify-between text-slate-500 text-[11px] border-b border-gray-200 pb-2">
+                        <span className="font-semibold text-amber-700">
+                          Alokasi Potongan HO ({hoPercent}%):
+                        </span>
+                        <span className="font-mono font-bold text-amber-600">
+                          -{formatIDR(calculatedHoCut)}
+                        </span>
+                      </div>
+                    )}
                     <div className="flex items-center justify-between pt-1">
-                      <span className="font-extrabold text-slate-700 text-[11px] sm:text-xs">Estimasi Nilai Netto Kontrak (Bruto + PPN - PPh):</span>
+                      <span className="font-extrabold text-slate-700 text-[11px] sm:text-xs">
+                        Estimasi Nilai Netto Kontrak (setelah PPN, PPh &amp; HO Cut):
+                      </span>
                       <span className="font-mono font-black text-blue-700 text-sm">
                         {formatIDR(calculatedNetto)}
                       </span>
@@ -1111,6 +1395,117 @@ export default function PurchaseOrderManager({
                   </div>
                 );
               })()}
+            </div>
+
+            {/* Upload PDF PO Section */}
+            <div className="bg-blue-50/20 border border-blue-500/10 rounded-2xl p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-xs font-bold text-gray-900 uppercase tracking-wider flex items-center gap-1.5">
+                    <FileText className="w-4 h-4 text-blue-600" /> Dokumen Pendukung PDF Purchase Order (PO)
+                  </h4>
+                  <p className="text-[11px] text-gray-500 mt-0.5">Unggah salinan dokumen PDF PO resmi untuk disimpan dalam sistem dan dijalankan/diakses secara instan.</p>
+                </div>
+              </div>
+
+              <div
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setIsDragging(true);
+                }}
+                onDragLeave={() => setIsDragging(false)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setIsDragging(false);
+                  const files = e.dataTransfer.files;
+                  if (files && files.length > 0) {
+                    handleFileSelect(files[0]);
+                  }
+                }}
+                className={`border-2 border-dashed rounded-xl p-6 flex flex-col items-center justify-center transition-all cursor-pointer ${
+                  isDragging
+                    ? "border-blue-500 bg-blue-50/50"
+                    : pdfFileBase64
+                    ? "border-emerald-500 bg-emerald-50/10"
+                    : "border-gray-300 hover:border-blue-400 bg-gray-50/50"
+                }`}
+                onClick={() => {
+                  document.getElementById("pdf-upload-input")?.click();
+                }}
+              >
+                <input
+                  id="pdf-upload-input"
+                  type="file"
+                  accept="application/pdf"
+                  className="hidden"
+                  onChange={(e) => {
+                    const files = e.target.files;
+                    if (files && files.length > 0) {
+                      handleFileSelect(files[0]);
+                    }
+                  }}
+                />
+
+                {pdfFileBase64 ? (
+                  <div className="flex flex-col items-center gap-2">
+                    <div className="w-10 h-10 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center">
+                      <CheckCircle2 className="w-6 h-6" />
+                    </div>
+                    <div className="text-center">
+                      <p className="text-xs font-bold text-gray-800">{pdfFileName}</p>
+                      <p className="text-[10px] text-gray-400 mt-0.5">PDF Berhasil Diunggah</p>
+                    </div>
+                    <div className="flex items-center gap-2 mt-2">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (pdfFileBase64) {
+                            setSelectedPdfPreview({ name: pdfFileName || "Preview PO", data: pdfFileBase64 });
+                          }
+                        }}
+                        className="bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-bold px-3 py-1 rounded-lg flex items-center gap-1 cursor-pointer shadow-sm"
+                      >
+                        <FileText className="w-3.5 h-3.5" /> Buka / Jalankan PDF
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setPdfFileBase64(null);
+                          setPdfFileName(null);
+                        }}
+                        className="bg-red-50 hover:bg-red-100 text-red-600 text-[10px] font-bold px-3 py-1 rounded-lg cursor-pointer"
+                      >
+                        Hapus File
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center text-center space-y-1.5">
+                    <div className="w-10 h-10 bg-gray-150 text-gray-500 rounded-full flex items-center justify-center mb-1">
+                      <FileText className="w-5 h-5 text-gray-400" />
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold text-gray-700">Tarik &amp; lepas file PDF PO di sini, atau klik untuk memilih</p>
+                      <p className="text-[10px] text-gray-400">Hanya format file PDF yang diperbolehkan (Maksimal 15MB)</p>
+                    </div>
+                    {/* Direct run helper button */}
+                    <div className="flex flex-wrap gap-2 justify-center pt-2">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          generateDummyPdf(`PO-${poNo || "MCJ-SAMPLE"}.pdf`);
+                        }}
+                        className="bg-white hover:bg-gray-100 text-gray-700 border border-gray-300 text-[10px] font-semibold px-2.5 py-1 rounded-lg shadow-sm cursor-pointer"
+                      >
+                        ✨ Gunakan Contoh PO PDF
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Deskripsi */}
@@ -1153,6 +1548,9 @@ export default function PurchaseOrderManager({
                   setCompany("CV. Mandiri Cipta Jaya");
                   setCustomCompany("");
                   setPphPercentInput(4);
+                  setApplyHoCut(true);
+                  setHoPercent(2);
+                  setHoCutValue(0);
                 }}
                 className="border border-gray-200 text-gray-600 px-4 py-2 text-xs font-semibold rounded-xl hover:bg-gray-50 transition-all cursor-pointer"
               >
@@ -1247,6 +1645,19 @@ export default function PurchaseOrderManager({
               ) : (
                 filteredPOs.map((po) => {
                   const proj = projects.find((p) => p.id === po.projectId);
+                  let poPdfData: { name: string; data: string } | null = null;
+                  if (po.transferProof) {
+                    try {
+                      const parsed = JSON.parse(po.transferProof);
+                      if (parsed && parsed.data) {
+                        poPdfData = { name: parsed.name || "PO_Document.pdf", data: parsed.data };
+                      } else {
+                        poPdfData = { name: "PO_Document.pdf", data: po.transferProof };
+                      }
+                    } catch (e) {
+                      poPdfData = { name: "PO_Document.pdf", data: po.transferProof };
+                    }
+                  }
 
                   return (
                     <tr key={po.id} className="hover:bg-slate-50/50">
@@ -1262,6 +1673,17 @@ export default function PurchaseOrderManager({
                           <div className="text-[10px] text-blue-700 font-bold uppercase tracking-wider font-sans">
                             🏢 {po.company}
                           </div>
+                        )}
+                        {poPdfData && (
+                          <button
+                            type="button"
+                            onClick={() => setSelectedPdfPreview(poPdfData)}
+                            className="inline-flex items-center gap-1 mt-1 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold px-2 py-0.5 rounded text-[10px] border border-blue-200 transition-colors cursor-pointer"
+                            title="Buka / Jalankan File PDF PO"
+                          >
+                            <FileText className="w-3 h-3 text-blue-600" />
+                            PDF Terlampir
+                          </button>
                         )}
                       </td>
 
@@ -1289,17 +1711,26 @@ export default function PurchaseOrderManager({
                       {/* Amount */}
                       <td className="p-3.5 text-right font-mono space-y-1">
                         <div className="font-bold text-slate-900 text-sm">{formatIDR(po.amount)}</div>
-                        {proj && (
-                          <div className="text-[10px] text-gray-500 flex flex-col items-end gap-0.5">
-                            <span className="text-[9px] text-gray-400">PPN (11%): +{formatIDR(po.amount * 0.11)}</span>
-                            <span className="font-semibold text-red-600">
-                              PPh ({proj.pphPercent !== undefined ? proj.pphPercent : 4}%): -{formatIDR(po.amount * ((proj.pphPercent !== undefined ? proj.pphPercent : 4) / 100))}
-                            </span>
-                            <span className="font-bold text-blue-700 text-[10px] border-t border-gray-100 pt-0.5 mt-0.5">
-                              Netto: {formatIDR(po.amount + (po.amount * 0.11) - (po.amount * ((proj.pphPercent !== undefined ? proj.pphPercent : 4) / 100)))}
-                            </span>
-                          </div>
-                        )}
+                        {proj && (() => {
+                          const isHoOrEjt = proj.name.toUpperCase().includes("HO") || (proj.code && proj.code.toUpperCase().includes("HO")) || proj.name.toUpperCase().includes("EJT");
+                          const ppnRate = isHoOrEjt ? ((proj.ppnPercent === 11 || proj.ppnPercent === undefined) ? 0 : proj.ppnPercent) : (proj.ppnPercent !== undefined ? proj.ppnPercent : 11);
+                          const pphRate = isHoOrEjt ? ((proj.pphPercent === 4 || proj.pphPercent === undefined) ? 0 : proj.pphPercent) : (proj.pphPercent !== undefined ? proj.pphPercent : 4);
+                          const ppnVal = po.amount * (ppnRate / 100);
+                          const pphVal = po.amount * (pphRate / 100);
+                          const nettoVal = po.amount + ppnVal - pphVal;
+
+                          return (
+                            <div className="text-[10px] text-gray-500 flex flex-col items-end gap-0.5">
+                              <span className="text-[9px] text-gray-400">PPN ({ppnRate}%): +{formatIDR(ppnVal)}</span>
+                              <span className="font-semibold text-red-600">
+                                PPh ({pphRate}%): -{formatIDR(pphVal)}
+                              </span>
+                              <span className="font-bold text-blue-700 text-[10px] border-t border-gray-100 pt-0.5 mt-0.5">
+                                Netto: {formatIDR(nettoVal)}
+                              </span>
+                            </div>
+                          );
+                        })()}
                       </td>
 
                       {/* Status */}
@@ -1321,7 +1752,16 @@ export default function PurchaseOrderManager({
 
                       {/* Actions */}
                       {!isReadOnly && (
-                        <td className="p-3.5 text-right flex justify-end gap-1.5">
+                        <td className="p-3.5 text-right flex justify-end items-center gap-1.5">
+                          {poPdfData && (
+                            <button
+                              onClick={() => setSelectedPdfPreview(poPdfData)}
+                              className="text-emerald-500 hover:text-emerald-700 p-1.5 rounded hover:bg-emerald-50 transition-colors cursor-pointer"
+                              title="Jalankan / Buka PDF PO"
+                            >
+                              <FileText className="w-4 h-4" />
+                            </button>
+                          )}
                           <button
                             onClick={() => handleEditPO(po)}
                             className="text-gray-400 hover:text-blue-600 p-1.5 rounded hover:bg-blue-50 transition-colors cursor-pointer"
@@ -1397,6 +1837,9 @@ export default function PurchaseOrderManager({
           </button>
         </div>
       )}
+
+      {/* PDF DOCUMENT PREVIEW MODAL */}
+      <PdfViewerModal pdfData={selectedPdfPreview} onClose={() => setSelectedPdfPreview(null)} />
     </div>
   );
 }

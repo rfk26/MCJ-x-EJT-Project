@@ -57,6 +57,7 @@ export interface Project {
   company?: string;
   poNo?: string;
   customContractItems?: ContractItem[];
+  targetCompletionDate?: string;
 }
 
 export interface PetyCashItem {

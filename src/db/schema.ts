@@ -26,6 +26,7 @@ export const projects = pgTable("projects", {
   company: text("company"),
   poNo: text("po_no"),
   customContractItems: jsonb("custom_contract_items"),
+  targetCompletionDate: text("target_completion_date"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

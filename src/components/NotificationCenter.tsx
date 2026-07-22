@@ -24,10 +24,11 @@ export function generateAlerts(projects: Project[], transactions: Transaction[])
 
     // Total contract value (excluding Ppn/Pph for raw threshold, or net)
     const baseContract =
-      proj.contractValue.piping +
-      proj.contractValue.electrical +
-      proj.contractValue.mechanical +
-      proj.contractValue.scafolder;
+      (proj.contractValue?.piping || 0) +
+      (proj.contractValue?.electrical || 0) +
+      (proj.contractValue?.mechanical || 0) +
+      (proj.contractValue?.scafolder || 0) +
+      (proj.contractValue?.welder || 0);
 
     if (baseContract === 0) return;
 
@@ -131,7 +132,7 @@ export default function NotificationCenter({
       >
         <Bell className="w-5 h-5" />
         {unreadCount > 0 && (
-          <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-600 text-white font-sans text-[10px] font-bold flex items-center justify-center rounded-full border border-white animate-pulse">
+          <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-600 text-white font-sans text-[10px] font-bold flex items-center justify-center rounded-full border border-white">
             {unreadCount}
           </span>
         )}

@@ -5,7 +5,7 @@
 
 import React from "react";
 import { Project, Transaction, BudgetAlert, ProjectStatus } from "../types";
-import { Bell, AlertTriangle, Check, Trash2, X } from "lucide-react";
+import { Bell, AlertTriangle, Check, Trash2, X, Database } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
 interface NotificationCenterProps {
@@ -14,11 +14,48 @@ interface NotificationCenterProps {
   alerts: BudgetAlert[];
   setAlerts: React.Dispatch<React.SetStateAction<BudgetAlert[]>>;
   onCloseProject?: (projectId: string) => void;
+  onNavigateToBackup?: () => void;
 }
 
 export function generateAlerts(projects: Project[], transactions: Transaction[]): BudgetAlert[] {
   const alerts: BudgetAlert[] = [];
+  const now = new Date();
 
+  // 1. Backup Overdue Check (Threshold: default 7 days)
+  const lastBackupStr = typeof localStorage !== "undefined" ? localStorage.getItem("mcj_last_manual_backup_download_timestamp") : null;
+  const alertThresholdDays = typeof localStorage !== "undefined" ? Number(localStorage.getItem("mcj_backup_alert_days") || 7) : 7;
+
+  if (!lastBackupStr) {
+    alerts.push({
+      id: "alert-backup-never",
+      projectId: "backup-system",
+      projectName: "CADANGAN DATA (BACKUP)",
+      type: "danger",
+      message: "Data proyek & transaksi belum pernah diunduh/dicadangkan ke file JSON! Segera unduh file cadangan di menu Backup untuk mencegah risiko kehilangan data.",
+      date: now.toISOString().split("T")[0],
+      isRead: false,
+      percentage: 100,
+    });
+  } else {
+    const lastDate = new Date(lastBackupStr);
+    const diffMs = now.getTime() - lastDate.getTime();
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+    if (diffDays >= alertThresholdDays) {
+      alerts.push({
+        id: `alert-backup-overdue-${diffDays}`,
+        projectId: "backup-system",
+        projectName: "CADANGAN DATA (BACKUP)",
+        type: diffDays >= alertThresholdDays * 2 ? "danger" : "warning",
+        message: `Peringatan Pencadangan: Data proyek & transaksi belum dicadangkan selama ${diffDays} hari (Batas: ${alertThresholdDays} hari). Segera unduh file backup JSON terbaru!`,
+        date: now.toISOString().split("T")[0],
+        isRead: false,
+        percentage: Math.min(100, Math.round((diffDays / alertThresholdDays) * 100)),
+      });
+    }
+  }
+
+  // 2. Budget Threshold Checks for Active Projects
   projects.forEach((proj) => {
     if (proj.status === ProjectStatus.CANCEL) return;
 
@@ -73,6 +110,7 @@ export default function NotificationCenter({
   transactions,
   alerts,
   setAlerts,
+  onNavigateToBackup,
 }: NotificationCenterProps) {
   const [isOpen, setIsOpen] = React.useState(false);
   const [dismissedAlerts, setDismissedAlerts] = React.useState<string[]>(() => {
@@ -87,18 +125,24 @@ export default function NotificationCenter({
     }
   });
 
-  // Sync / regenerate alerts based on current state
+  // Sync / regenerate alerts based on current state & backup updates
   React.useEffect(() => {
-    const generated = generateAlerts(projects, transactions).filter(
-      (a) => !dismissedAlerts.includes(a.id)
-    );
-    setAlerts((prev) => {
-      // Keep read status if alert existed
-      return generated.map((newAlert) => {
-        const existing = prev.find((p) => p.id === newAlert.id);
-        return existing ? { ...newAlert, isRead: existing.isRead } : newAlert;
+    const updateAlerts = () => {
+      const generated = generateAlerts(projects, transactions).filter(
+        (a) => !dismissedAlerts.includes(a.id)
+      );
+      setAlerts((prev) => {
+        return generated.map((newAlert) => {
+          const existing = prev.find((p) => p.id === newAlert.id);
+          return existing ? { ...newAlert, isRead: existing.isRead } : newAlert;
+        });
       });
-    });
+    };
+
+    updateAlerts();
+
+    window.addEventListener("mcj_backup_updated", updateAlerts);
+    return () => window.removeEventListener("mcj_backup_updated", updateAlerts);
   }, [projects, transactions, dismissedAlerts, setAlerts]);
 
   const unreadCount = alerts.filter((a) => !a.isRead).length;
@@ -210,21 +254,37 @@ export default function NotificationCenter({
                         </div>
                         <p className="text-xs text-gray-600 leading-relaxed">{alert.message}</p>
 
-                        {/* Progress Bar in alert */}
-                        <div className="mt-2 space-y-1">
-                          <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
-                            <div
-                              className={`h-full rounded-full ${
-                                alert.type === "danger" ? "bg-red-600" : "bg-amber-500"
-                              }`}
-                              style={{ width: `${Math.min(alert.percentage, 100)}%` }}
-                            />
+                        {/* Progress Bar or Action in alert */}
+                        {alert.projectId === "backup-system" ? (
+                          <div className="mt-2 space-y-2">
+                            {onNavigateToBackup && (
+                              <button
+                                onClick={() => {
+                                  onNavigateToBackup();
+                                  setIsOpen(false);
+                                }}
+                                className="w-full text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white px-3 py-1.5 rounded-lg flex items-center justify-center gap-1.5 cursor-pointer shadow-xs transition-all"
+                              >
+                                <Database className="w-3.5 h-3.5" /> Buka Menu Backup &amp; Restore
+                              </button>
+                            )}
                           </div>
-                          <div className="flex justify-between text-[9px] text-gray-400">
-                            <span>Sisa Anggaran: {Math.max(0, 100 - alert.percentage).toFixed(1)}%</span>
-                            <span>Total Penggunaan: {alert.percentage.toFixed(1)}%</span>
+                        ) : (
+                          <div className="mt-2 space-y-1">
+                            <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
+                              <div
+                                className={`h-full rounded-full ${
+                                  alert.type === "danger" ? "bg-red-600" : "bg-amber-500"
+                                }`}
+                                style={{ width: `${Math.min(alert.percentage, 100)}%` }}
+                              />
+                            </div>
+                            <div className="flex justify-between text-[9px] text-gray-400">
+                              <span>Sisa Anggaran: {Math.max(0, 100 - alert.percentage).toFixed(1)}%</span>
+                              <span>Total Penggunaan: {alert.percentage.toFixed(1)}%</span>
+                            </div>
                           </div>
-                        </div>
+                        )}
 
                         {/* Actions */}
                         <div className="pt-2 flex items-center gap-3">

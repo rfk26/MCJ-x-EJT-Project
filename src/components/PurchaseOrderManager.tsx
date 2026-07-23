@@ -330,6 +330,35 @@ export default function PurchaseOrderManager({
     setContractItems((prev) => prev.filter((item) => item.id !== id));
   };
 
+  const resetPoForm = () => {
+    setEditingPoId(null);
+    setLinkProjectId("new");
+    setProjectName("");
+    setProjectCode("");
+    setPoNo("");
+    setSupplier("");
+    setPic("");
+    setContractItems([
+      { id: "piping", name: "Piping", value: 0 },
+      { id: "electrical", name: "Electrical", value: 0 },
+      { id: "mechanical", name: "Mechanical", value: 0 },
+      { id: "scafolder", name: "Scafolder", value: 0 },
+      { id: "welder", name: "Welder", value: 0 },
+    ]);
+    setDescription("");
+    setStatus("Waiting PO");
+    setCompany("CV. Mandiri Cipta Jaya");
+    setCustomCompany("");
+    setPpnPercentInput(11);
+    setPphPercentInput(4);
+    setApplyHoCut(true);
+    setHoPercent(2);
+    setHoCutValue(0);
+    setPdfFileBase64(null);
+    setPdfFileName(null);
+    setValidationError(null);
+  };
+
   // Generate automatic PO Number placeholder
   React.useEffect(() => {
     if (showAddForm && !poNo) {
@@ -727,32 +756,8 @@ export default function PurchaseOrderManager({
     }
 
     // Reset Form fields
-    setLinkProjectId("new");
-    setProjectName("");
-    setProjectCode("");
-    setPoNo("");
-    setSupplier("");
-    setPic("");
-    setContractItems([
-      { id: "piping", name: "Piping", value: 0 },
-      { id: "electrical", name: "Electrical", value: 0 },
-      { id: "mechanical", name: "Mechanical", value: 0 },
-      { id: "scafolder", name: "Scafolder", value: 0 },
-      { id: "welder", name: "Welder", value: 0 },
-    ]);
-    setDescription("");
-    setStatus("Waiting PO");
-    setCompany("CV. Mandiri Cipta Jaya");
-    setCustomCompany("");
-    setPpnPercentInput(11);
-    setPphPercentInput(4);
-    setApplyHoCut(true);
-    setHoPercent(2);
-    setHoCutValue(0);
-    setEditingPoId(null);
+    resetPoForm();
     setShowAddForm(false);
-    setPdfFileBase64(null);
-    setPdfFileName(null);
     setAlertMessage(editingPoId ? `Purchase Order (PO) "${poNo}" berhasil diperbarui.` : `Purchase Order (PO) "${poNo}" berhasil dicatat.`);
   };
 
@@ -973,28 +978,9 @@ export default function PurchaseOrderManager({
             onClick={() => {
               if (showAddForm) {
                 setShowAddForm(false);
-                setEditingPoId(null);
+                resetPoForm();
               } else {
-                setEditingPoId(null);
-                setLinkProjectId("new");
-                setProjectName("");
-                setProjectCode("");
-                setPoNo("");
-                setSupplier("");
-                setPic("");
-                setContractItems([
-                  { id: "piping", name: "Piping", value: 0 },
-                  { id: "electrical", name: "Electrical", value: 0 },
-                  { id: "mechanical", name: "Mechanical", value: 0 },
-                  { id: "scafolder", name: "Scafolder", value: 0 },
-                  { id: "welder", name: "Welder", value: 0 },
-                ]);
-                setDescription("");
-                setStatus("Waiting PO");
-                setPphPercentInput(4);
-                setApplyHoCut(true);
-                setHoPercent(2);
-                setHoCutValue(0);
+                resetPoForm();
                 setShowAddForm(true);
               }
             }}
@@ -1529,28 +1515,7 @@ export default function PurchaseOrderManager({
                 type="button"
                 onClick={() => {
                   setShowAddForm(false);
-                  setEditingPoId(null);
-                  setLinkProjectId("new");
-                  setProjectName("");
-                  setProjectCode("");
-                  setPoNo("");
-                  setSupplier("");
-                  setPic("");
-                  setContractItems([
-                    { id: "piping", name: "Piping", value: 0 },
-                    { id: "electrical", name: "Electrical", value: 0 },
-                    { id: "mechanical", name: "Mechanical", value: 0 },
-                    { id: "scafolder", name: "Scafolder", value: 0 },
-                    { id: "welder", name: "Welder", value: 0 },
-                  ]);
-                  setDescription("");
-                  setStatus("Waiting PO");
-                  setCompany("CV. Mandiri Cipta Jaya");
-                  setCustomCompany("");
-                  setPphPercentInput(4);
-                  setApplyHoCut(true);
-                  setHoPercent(2);
-                  setHoCutValue(0);
+                  resetPoForm();
                 }}
                 className="border border-gray-200 text-gray-600 px-4 py-2 text-xs font-semibold rounded-xl hover:bg-gray-50 transition-all cursor-pointer"
               >

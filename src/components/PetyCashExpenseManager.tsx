@@ -6,9 +6,10 @@
 import React from "react";
 import { Project, Transaction, Category, PetyCashItem } from "../types";
 import { CATEGORIES } from "../data";
-import { Plus, ListFilter, Search, Receipt, Trash2, HelpCircle, AlertTriangle, ShieldCheck, Landmark, CheckSquare, Calendar, ChevronDown, ChevronUp, Printer, User, Send, CheckCircle2, Edit2, FileText, X, Check } from "lucide-react";
+import { Plus, ListFilter, Search, Receipt, Trash2, HelpCircle, AlertTriangle, ShieldCheck, Landmark, CheckSquare, Calendar, ChevronDown, ChevronUp, Printer, User, Send, CheckCircle2, Edit2, FileText, X, Check, FileSpreadsheet } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { printVoucher } from "./PetyCashRequestManager";
+import ExcelPasteModal from "./ExcelPasteModal";
 
 interface PetyCashExpenseManagerProps {
   projects: Project[];
@@ -63,7 +64,16 @@ export default function PetyCashExpenseManager({
   const [itemDesc, setItemDesc] = React.useState("");
   const [itemCat, setItemCat] = React.useState<Category>("Consumable");
   const [itemAmt, setItemAmt] = React.useState<number>(0);
+  const [itemDate, setItemDate] = React.useState<string>(date);
   const [customCatName, setCustomCatName] = React.useState("");
+  const [showExcelModal, setShowExcelModal] = React.useState(false);
+
+  // Sync itemDate with main form date when main date changes
+  React.useEffect(() => {
+    if (date) {
+      setItemDate(date);
+    }
+  }, [date]);
 
   const amount = currentItems.reduce((sum, item) => sum + item.amount, 0);
 
@@ -95,10 +105,11 @@ export default function PetyCashExpenseManager({
     setValidationError(null);
 
     const newItem: PetyCashItem = {
-      id: `item-${Date.now()}-${Math.random()}`,
+      id: `item-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
       description: itemDesc.trim(),
       category: finalCat,
       amount: Number(itemAmt),
+      date: itemDate || date,
     };
 
     setCurrentItems((prev) => [...prev, newItem]);
@@ -108,6 +119,18 @@ export default function PetyCashExpenseManager({
     setItemAmt(0);
     setCustomCatName("");
     setItemCat("Consumable");
+  };
+
+  // Handle updating an existing item in currentItems
+  const handleUpdateCurrentItem = (id: string, field: keyof PetyCashItem, value: any) => {
+    setCurrentItems((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, [field]: value } : item))
+    );
+  };
+
+  // Handle importing items from Excel modal
+  const handleImportExcelItems = (importedItems: PetyCashItem[]) => {
+    setCurrentItems((prev) => [...prev, ...importedItems]);
   };
 
   // Handle removing individual item from list
@@ -291,7 +314,7 @@ export default function PetyCashExpenseManager({
     }, 150);
   };
 
-  const handleCancelEdit = () => {
+  const resetExpenseForm = () => {
     setEditingExpenseId(null);
     setPic("");
     setDescription("");
@@ -299,7 +322,17 @@ export default function PetyCashExpenseManager({
     setCompany("CV. Mandiri Cipta Jaya");
     setCustomCompany("");
     setIsManualNo(false);
+    setPetyCashNo("");
     setSelectedRequestIdForExpense("");
+    setValidationError(null);
+    setItemDesc("");
+    setItemAmt(0);
+    setCustomCatName("");
+    setItemCat("Consumable");
+  };
+
+  const handleCancelEdit = () => {
+    resetExpenseForm();
     setShowAddForm(false);
   };
 
@@ -378,21 +411,14 @@ export default function PetyCashExpenseManager({
         );
       }
 
-      setEditingExpenseId(null);
-      setPic("");
-      setDescription("");
-      setCurrentItems([]);
-      setCompany("CV. Mandiri Cipta Jaya");
-      setCustomCompany("");
-      setIsManualNo(false);
-      setSelectedRequestIdForExpense("");
+      resetExpenseForm();
       setShowAddForm(false);
       setAlertMessage("Catatan pengeluaran petty cash berhasil diperbarui.");
       return;
     }
 
     const newExpense: Transaction = {
-      id: `tx-${Date.now()}`,
+      id: `tx-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       projectId,
       type: "PetyCash",
       pic,
@@ -443,13 +469,7 @@ export default function PetyCashExpenseManager({
     }
 
     // Reset Form
-    setPic("");
-    setDescription("");
-    setCurrentItems([]);
-    setCompany("CV. Mandiri Cipta Jaya");
-    setCustomCompany("");
-    setIsManualNo(false);
-    setSelectedRequestIdForExpense("");
+    resetExpenseForm();
     setShowAddForm(false);
     setAlertMessage("Catatan pengeluaran petty cash berhasil disimpan.");
   };
@@ -562,10 +582,18 @@ export default function PetyCashExpenseManager({
 
         {!isReadOnly && (
           <button
-            onClick={() => setShowAddForm(!showAddForm)}
+            onClick={() => {
+              if (showAddForm) {
+                setShowAddForm(false);
+                resetExpenseForm();
+              } else {
+                resetExpenseForm();
+                setShowAddForm(true);
+              }
+            }}
             className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl flex items-center justify-center gap-2 text-xs font-semibold shadow-md transition-all cursor-pointer"
           >
-            <Plus className="w-4 h-4" /> Catat Pengeluaran Baru
+            <Plus className="w-4 h-4" /> {showAddForm ? "Tutup Form" : "Catat Pengeluaran Baru"}
           </button>
         )}
       </div>
@@ -615,10 +643,13 @@ export default function PetyCashExpenseManager({
                       setDescription(`[Realisasi ${req.petyCashNo}] ${req.description}`);
                       setCategory(req.category || "Consumable");
                       if (req.items && req.items.length > 0) {
-                        setCurrentItems(req.items.map(item => ({ ...item })));
+                        setCurrentItems(req.items.map((item, idx) => ({
+                          ...item,
+                          id: `item-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 6)}`,
+                        })));
                       } else {
                         setCurrentItems([{
-                          id: `item-${Date.now()}`,
+                          id: `item-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
                           description: req.description,
                           category: req.category || "Consumable",
                           amount: getRequestRemaining(req),
@@ -777,19 +808,29 @@ export default function PetyCashExpenseManager({
 
             {/* SECTION 2: MULTI-ITEM BUILDER TABLE */}
             <div className="bg-slate-50 rounded-2xl p-5 border border-slate-200/60 space-y-4">
-              <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-2">
                 <h4 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
                   📋 Rincian Belanja Aktual (Multi-Item Table)
                 </h4>
-                <span className="text-[10px] bg-slate-200 text-slate-700 font-bold px-2 py-0.5 rounded-md">
-                  Input Manual &amp; List
-                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowExcelModal(true)}
+                    className="text-[11px] bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3 py-1.5 rounded-lg shadow-sm transition-all flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <FileSpreadsheet className="w-3.5 h-3.5" />
+                    <span>Paste dari Excel</span>
+                  </button>
+                  <span className="text-[10px] bg-slate-200 text-slate-700 font-bold px-2 py-0.5 rounded-md hidden sm:inline-block">
+                    Input Manual &amp; List
+                  </span>
+                </div>
               </div>
 
               {/* Item inputs row */}
-              <div className="grid grid-cols-1 md:grid-cols-7 gap-3 items-end bg-white p-3.5 rounded-xl border border-gray-200">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-12 gap-2.5 items-end bg-white p-3.5 rounded-xl border border-gray-200">
                 {/* Item description */}
-                <div className="space-y-1 md:col-span-3">
+                <div className="space-y-1 md:col-span-4">
                   <label className="text-[10px] font-bold text-gray-500">Deskripsi Barang / Keperluan</label>
                   <input
                     type="text"
@@ -799,8 +840,22 @@ export default function PetyCashExpenseManager({
                     className="w-full bg-white border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs focus:ring-1 focus:ring-blue-600"
                   />
                 </div>
+
+                {/* Item Date */}
+                <div className="space-y-1 md:col-span-2">
+                  <label className="text-[10px] font-bold text-gray-500 flex items-center gap-1">
+                    <Calendar className="w-3 h-3 text-blue-600" /> Tanggal Item
+                  </label>
+                  <input
+                    type="date"
+                    value={itemDate || date}
+                    onChange={(e) => setItemDate(e.target.value)}
+                    className="w-full bg-white border border-gray-200 rounded-lg px-2 py-1.5 text-xs font-mono focus:ring-1 focus:ring-blue-600"
+                  />
+                </div>
+
                 {/* Item Category */}
-                <div className="space-y-1 md:col-span-1">
+                <div className="space-y-1 md:col-span-2">
                   <label className="text-[10px] font-bold text-gray-500">Kategori</label>
                   <select
                     value={itemCat}
@@ -817,7 +872,7 @@ export default function PetyCashExpenseManager({
                 </div>
 
                 {/* Item Amount */}
-                <div className="space-y-1 md:col-span-2">
+                <div className="space-y-1 md:col-span-3">
                   <label className="text-[10px] font-bold text-gray-500">Nominal (Rp)</label>
                   <input
                     type="text"
@@ -864,40 +919,76 @@ export default function PetyCashExpenseManager({
               )}
 
               {/* List of currently added items */}
-              <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+              <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
                 <table className="w-full text-left text-xs">
                   <thead>
                     <tr className="bg-slate-100 text-gray-600 font-semibold border-b border-gray-200">
-                      <th className="p-2 w-10 text-center">No</th>
+                      <th className="p-2 w-8 text-center">No</th>
+                      <th className="p-2 w-32">Tanggal Item</th>
                       <th className="p-2">Deskripsi Barang / Jasa</th>
-                      <th className="p-2">Kategori</th>
-                      <th className="p-2 text-right">Nominal</th>
-                      <th className="p-2 text-center w-12">Hapus</th>
+                      <th className="p-2 w-36">Kategori</th>
+                      <th className="p-2 text-right w-36">Nominal (Rp)</th>
+                      <th className="p-2 text-center w-10">Hapus</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
                     {currentItems.length === 0 ? (
                       <tr>
-                        <td colSpan={5} className="p-4 text-center text-gray-400 font-medium italic">
-                          Belum ada item pengeluaran yang ditambahkan. Gunakan kolom di atas untuk membuat list.
+                        <td colSpan={6} className="p-4 text-center text-gray-400 font-medium italic">
+                          Belum ada item pengeluaran yang ditambahkan. Gunakan kolom di atas atau tombol <strong>Paste dari Excel</strong>.
                         </td>
                       </tr>
                     ) : (
                       currentItems.map((item, index) => (
-                        <tr key={item.id} className="hover:bg-slate-50/50">
+                        <tr key={item.id} className="hover:bg-slate-50/80 transition-colors">
                           <td className="p-2 text-center text-gray-400 font-mono">{index + 1}</td>
-                          <td className="p-2 font-medium text-slate-800">{item.description}</td>
-                          <td className="p-2">
-                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-gray-100 text-gray-700">
-                              {item.category}
-                            </span>
+                          <td className="p-1.5">
+                            <input
+                              type="date"
+                              value={item.date || date}
+                              onChange={(e) => handleUpdateCurrentItem(item.id, "date", e.target.value)}
+                              className="w-full bg-slate-50 border border-gray-200 rounded px-1.5 py-1 text-[11px] font-mono focus:bg-white focus:ring-1 focus:ring-blue-500"
+                            />
                           </td>
-                          <td className="p-2 text-right font-mono font-bold text-slate-950">{formatIDR(item.amount)}</td>
-                          <td className="p-2 text-center">
+                          <td className="p-1.5">
+                            <input
+                              type="text"
+                              value={item.description}
+                              onChange={(e) => handleUpdateCurrentItem(item.id, "description", e.target.value)}
+                              className="w-full bg-slate-50 border border-gray-200 rounded px-2 py-1 text-xs font-medium text-slate-800 focus:bg-white focus:ring-1 focus:ring-blue-500"
+                            />
+                          </td>
+                          <td className="p-1.5">
+                            <select
+                              value={item.category}
+                              onChange={(e) => handleUpdateCurrentItem(item.id, "category", e.target.value)}
+                              className="w-full bg-slate-50 border border-gray-200 rounded px-1.5 py-1 text-[11px] font-medium text-slate-700 focus:bg-white focus:ring-1 focus:ring-blue-500"
+                            >
+                              {categories.map((cat) => (
+                                <option key={cat} value={cat}>
+                                  {cat}
+                                </option>
+                              ))}
+                            </select>
+                          </td>
+                          <td className="p-1.5">
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              value={item.amount ? new Intl.NumberFormat("id-ID").format(item.amount) : ""}
+                              onChange={(e) => {
+                                const clean = e.target.value.replace(/\D/g, "");
+                                handleUpdateCurrentItem(item.id, "amount", clean ? Number(clean) : 0);
+                              }}
+                              className="w-full bg-slate-50 border border-gray-200 rounded px-2 py-1 text-xs font-mono font-bold text-right text-slate-900 focus:bg-white focus:ring-1 focus:ring-blue-500"
+                            />
+                          </td>
+                          <td className="p-1.5 text-center">
                             <button
                               type="button"
                               onClick={() => handleRemoveItem(item.id)}
                               className="text-gray-400 hover:text-red-600 p-1 rounded hover:bg-red-50 transition-colors"
+                              title="Hapus Item"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
@@ -909,8 +1000,8 @@ export default function PetyCashExpenseManager({
                   {currentItems.length > 0 && (
                     <tfoot>
                       <tr className="bg-slate-50 font-bold border-t border-gray-200">
-                        <td colSpan={3} className="p-2.5 text-right text-gray-600 text-[11px] uppercase tracking-wider">
-                          Total Pengeluaran Aktual:
+                        <td colSpan={4} className="p-2.5 text-right text-gray-600 text-[11px] uppercase tracking-wider">
+                          Total Pengeluaran Aktual ({currentItems.length} Item):
                         </td>
                         <td className="p-2.5 text-right font-mono text-blue-600 text-sm">{formatIDR(amount)}</td>
                         <td></td>
@@ -952,14 +1043,7 @@ export default function PetyCashExpenseManager({
             <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
               <button
                 type="button"
-                onClick={() => {
-                  if (editingExpenseId) {
-                    handleCancelEdit();
-                  } else {
-                    setShowAddForm(false);
-                    setCurrentItems([]);
-                  }
-                }}
+                onClick={handleCancelEdit}
                 className="px-4 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-100 rounded-xl transition-all cursor-pointer"
               >
                 Batalkan
@@ -1066,10 +1150,13 @@ export default function PetyCashExpenseManager({
                               setDescription(`[Realisasi ${req.petyCashNo}] ${req.description}`);
                               setCategory(req.category || "Consumable");
                               if (req.items && req.items.length > 0) {
-                                setCurrentItems(req.items.map(item => ({ ...item })));
+                                setCurrentItems(req.items.map((item, idx) => ({
+                                  ...item,
+                                  id: `item-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 6)}`,
+                                })));
                               } else {
                                 setCurrentItems([{
-                                  id: `item-${Date.now()}`,
+                                  id: `item-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
                                   description: req.description,
                                   category: req.category || "Consumable",
                                   amount: remaining,
@@ -1375,6 +1462,7 @@ export default function PetyCashExpenseManager({
                                     <thead>
                                       <tr className="bg-slate-50 border-b border-gray-100 text-gray-400 font-semibold">
                                         <th className="p-2 w-10 text-center">No</th>
+                                        <th className="p-2 w-28">Tanggal Item</th>
                                         <th className="p-2">Deskripsi Barang / Jasa</th>
                                         <th className="p-2">Kategori Anggaran</th>
                                         <th className="p-2 text-right">Harga Item</th>
@@ -1384,6 +1472,7 @@ export default function PetyCashExpenseManager({
                                       {tx.items?.map((item, idx) => (
                                         <tr key={item.id} className="hover:bg-slate-50">
                                           <td className="p-2 text-center text-gray-400 font-mono">{idx + 1}</td>
+                                          <td className="p-2 text-gray-600 font-mono text-[11px]">{item.date || tx.date}</td>
                                           <td className="p-2 font-medium text-slate-800">{item.description}</td>
                                           <td className="p-2">
                                             <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 uppercase">
@@ -1396,7 +1485,7 @@ export default function PetyCashExpenseManager({
                                     </tbody>
                                     <tfoot>
                                       <tr className="bg-slate-100 font-bold border-t border-gray-200">
-                                        <td colSpan={3} className="p-2.5 text-right text-gray-600 text-[10px] uppercase tracking-wider">
+                                        <td colSpan={4} className="p-2.5 text-right text-gray-600 text-[10px] uppercase tracking-wider">
                                           Total Pengeluaran Realisasi:
                                         </td>
                                         <td className="p-2.5 text-right font-mono text-red-600 text-sm">{formatIDR(tx.amount)}</td>
@@ -1656,6 +1745,15 @@ export default function PetyCashExpenseManager({
           </div>
         </div>
       )}
+
+      {/* EXCEL PASTE MODAL */}
+      <ExcelPasteModal
+        isOpen={showExcelModal}
+        onClose={() => setShowExcelModal(false)}
+        onImport={handleImportExcelItems}
+        categories={categories}
+        defaultDate={date}
+      />
 
       {/* ALERT TOAST NOTIFICATION */}
       {alertMessage && (

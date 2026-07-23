@@ -37,6 +37,7 @@ import {
   Moon,
   ChevronLeft,
   ChevronRight,
+  Building2,
 } from "lucide-react";
 import { Project, Transaction, BudgetAlert, ProjectStatus, ActivityLog } from "./types";
 import { INITIAL_PROJECTS, INITIAL_TRANSACTIONS, COMPANY_INFO, INITIAL_ACTIVITIES } from "./data";
@@ -51,6 +52,7 @@ import NotificationCenter from "./components/NotificationCenter";
 import InvoiceManager from "./components/InvoiceManager";
 import BackupManager from "./components/BackupManager";
 import SalaryManager from "./components/SalaryManager";
+import CompanyLogoModal from "./components/CompanyLogoModal";
 import { io } from "socket.io-client";
 // No custom logo import needed
 
@@ -209,7 +211,56 @@ export default function App() {
 
   // Custom modal and toast states
   const [showResetModal, setShowResetModal] = useState(false);
+  const [showLogoModal, setShowLogoModal] = useState(false);
+  const [customLogoMCJ, setCustomLogoMCJ] = useState<string | null>(() => {
+    return localStorage.getItem("mcj_company_logo");
+  });
+  const [customLogoEJT, setCustomLogoEJT] = useState<string | null>(() => {
+    return localStorage.getItem("mcj_company_logo_ejt");
+  });
   const [appToast, setAppToast] = useState<{ message: string; type: "success" | "info" } | null>(null);
+
+  // Backup Overdue Tracker State
+  const [backupOverdueInfo, setBackupOverdueInfo] = useState<{ isOverdue: boolean; days: number | null }>(() => {
+    const lastBackupStr = localStorage.getItem("mcj_last_manual_backup_download_timestamp");
+    const threshold = Number(localStorage.getItem("mcj_backup_alert_days") || 7);
+    if (!lastBackupStr) return { isOverdue: true, days: null };
+    const diffDays = Math.floor((Date.now() - new Date(lastBackupStr).getTime()) / (1000 * 60 * 60 * 24));
+    return { isOverdue: diffDays >= threshold, days: diffDays };
+  });
+
+  useEffect(() => {
+    const checkBackupStatus = () => {
+      const lastBackupStr = localStorage.getItem("mcj_last_manual_backup_download_timestamp");
+      const threshold = Number(localStorage.getItem("mcj_backup_alert_days") || 7);
+      if (!lastBackupStr) {
+        setBackupOverdueInfo({ isOverdue: true, days: null });
+      } else {
+        const diffDays = Math.floor((Date.now() - new Date(lastBackupStr).getTime()) / (1000 * 60 * 60 * 24));
+        setBackupOverdueInfo({ isOverdue: diffDays >= threshold, days: diffDays });
+      }
+    };
+
+    checkBackupStatus();
+    window.addEventListener("mcj_backup_updated", checkBackupStatus);
+    return () => window.removeEventListener("mcj_backup_updated", checkBackupStatus);
+  }, []);
+
+  const handleSaveLogo = (logoMCJ: string | null, logoEJT: string | null) => {
+    setCustomLogoMCJ(logoMCJ);
+    setCustomLogoEJT(logoEJT);
+    if (logoMCJ) {
+      localStorage.setItem("mcj_company_logo", logoMCJ);
+    } else {
+      localStorage.removeItem("mcj_company_logo");
+    }
+    if (logoEJT) {
+      localStorage.setItem("mcj_company_logo_ejt", logoEJT);
+    } else {
+      localStorage.removeItem("mcj_company_logo_ejt");
+    }
+    setAppToast({ message: "Logo perusahaan berhasil diperbarui!", type: "success" });
+  };
 
   const [activities, setActivities] = useState<ActivityLog[]>(() => {
     return safeJsonParse<ActivityLog[]>("mcj_activities", INITIAL_ACTIVITIES);
@@ -881,9 +932,24 @@ export default function App() {
           
           {/* Logo & Header */}
           <div className="text-center mb-6">
-            <div className="mx-auto inline-flex px-4 h-12 bg-blue-600 dark:bg-blue-500 rounded-xl items-center justify-center text-white text-base font-black shadow-md shadow-blue-500/20 mb-4 select-none">
-              MCJxEJT
-            </div>
+            {customLogoMCJ || customLogoEJT ? (
+              <div className="flex items-center justify-center gap-3 mb-4">
+                {customLogoMCJ && (
+                  <div className="w-16 h-16 bg-white dark:bg-slate-800 p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-md flex items-center justify-center overflow-hidden">
+                    <img src={customLogoMCJ} alt="Logo MCJ" className="max-w-full max-h-full object-contain" />
+                  </div>
+                )}
+                {customLogoEJT && (
+                  <div className="w-16 h-16 bg-white dark:bg-slate-800 p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-md flex items-center justify-center overflow-hidden">
+                    <img src={customLogoEJT} alt="Logo EJT" className="max-w-full max-h-full object-contain" />
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="mx-auto inline-flex px-4 h-12 bg-blue-600 dark:bg-blue-500 rounded-xl items-center justify-center text-white text-base font-black shadow-md shadow-blue-500/20 mb-4 select-none">
+                MCJxEJT
+              </div>
+            )}
             <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight text-slate-950 dark:text-white">Portal Keuangan Proyek</h1>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5 uppercase tracking-wider font-bold">
               CV. Mandiri Cipta Jaya <span className="text-blue-500 font-extrabold">&times;</span> PT. Elqia Jaya Teknik
@@ -1022,9 +1088,24 @@ export default function App() {
         {/* Brand Header */}
         <div className="h-16 flex items-center justify-between px-4 border-b border-slate-200 dark:border-slate-800 shrink-0">
           <div className="flex items-center gap-3 overflow-hidden">
-            <div className="px-2 h-9 bg-blue-600 dark:bg-blue-500 text-white font-black text-[10px] flex items-center justify-center rounded-xl shadow-md shrink-0 select-none">
-              MCJxEJT
-            </div>
+            {customLogoMCJ || customLogoEJT ? (
+              <div className="flex items-center gap-1 shrink-0">
+                {customLogoMCJ && (
+                  <div className="w-8 h-8 bg-white dark:bg-slate-800 p-0.5 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm flex items-center justify-center overflow-hidden">
+                    <img src={customLogoMCJ} alt="Logo MCJ" className="max-w-full max-h-full object-contain" />
+                  </div>
+                )}
+                {customLogoEJT && (
+                  <div className="w-8 h-8 bg-white dark:bg-slate-800 p-0.5 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm flex items-center justify-center overflow-hidden">
+                    <img src={customLogoEJT} alt="Logo EJT" className="max-w-full max-h-full object-contain" />
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="px-2 h-9 bg-blue-600 dark:bg-blue-500 text-white font-black text-[10px] flex items-center justify-center rounded-xl shadow-md shrink-0 select-none">
+                MCJxEJT
+              </div>
+            )}
             {!sidebarCollapsed && (
               <div className="flex flex-col truncate">
                 <span className="text-xs font-black tracking-wider text-slate-900 dark:text-white leading-none uppercase">MCJ x EJT</span>
@@ -1207,12 +1288,25 @@ export default function App() {
               </button>
             )}
 
+            {/* Ganti Logo Perusahaan Button */}
+            {currentUser && (
+              <button
+                onClick={() => setShowLogoModal(true)}
+                className="p-2 md:px-3 md:py-2 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-all cursor-pointer flex items-center gap-2 shadow-xs"
+                title="Upload & Ganti Logo Perusahaan Secara Manual"
+              >
+                <Building2 className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                <span className="text-xs font-bold hidden lg:inline">Ganti Logo</span>
+              </button>
+            )}
+
             {/* Notification Center */}
             <NotificationCenter
               projects={projects}
               transactions={transactions}
               alerts={alerts}
               setAlerts={setAlerts}
+              onNavigateToBackup={() => setActiveTab("backup")}
             />
 
             {/* Logout Button */}
@@ -1225,6 +1319,30 @@ export default function App() {
             </button>
           </div>
         </header>
+
+        {/* BACKUP OVERDUE ALERT BANNER */}
+        {currentUser && backupOverdueInfo.isOverdue && (
+          <div className="bg-gradient-to-r from-amber-600 to-amber-700 text-white px-4 py-2.5 shadow-sm text-xs flex flex-wrap items-center justify-between gap-3 font-sans border-b border-amber-800 animate-in fade-in duration-300">
+            <div className="flex items-center gap-2.5">
+              <div className="p-1 bg-amber-800/60 rounded-lg shrink-0">
+                <AlertTriangle className="w-4 h-4 text-amber-200" />
+              </div>
+              <span>
+                <strong>Peringatan Cadangan Data:</strong>{" "}
+                {backupOverdueInfo.days !== null
+                  ? `Data proyek & transaksi belum dicadangkan (download JSON) selama ${backupOverdueInfo.days} hari.`
+                  : "Data proyek & transaksi belum pernah dicadangkan (download JSON) ke file komputer Anda."}{" "}
+                Lakukan unduh cadangan secara berkala di menu Backup untuk mencegah kehilangan data.
+              </span>
+            </div>
+            <button
+              onClick={() => setActiveTab("backup")}
+              className="px-3 py-1.5 bg-white text-amber-900 hover:bg-amber-50 font-bold rounded-lg text-xs transition-all shadow-xs shrink-0 cursor-pointer flex items-center gap-1.5"
+            >
+              <Database className="w-3.5 h-3.5 text-amber-700" /> Cadangkan Sekarang
+            </button>
+          </div>
+        )}
 
         {/* CORE WORKSPACE COMPONENT STAGE */}
         <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
@@ -1771,6 +1889,15 @@ export default function App() {
       );
     })()
   )}
+
+      {/* COMPANY LOGO UPLOAD MODAL */}
+      <CompanyLogoModal
+        isOpen={showLogoModal}
+        onClose={() => setShowLogoModal(false)}
+        customLogo={customLogoMCJ}
+        customLogoEJT={customLogoEJT}
+        onSaveLogo={handleSaveLogo}
+      />
 
       {/* APP TOAST NOTIFICATION */}
       {appToast && (

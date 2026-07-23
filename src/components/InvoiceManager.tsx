@@ -128,12 +128,19 @@ export default function InvoiceManager({
     }, 150);
   };
 
-  const handleCancelEdit = () => {
+  const resetInvoiceForm = () => {
     setEditingInvoiceId(null);
     setInvoiceNo("");
     setAmount(0);
     setDescription("");
     setStatus("Sudah Dikirim");
+    setCompany("CV. Mandiri Cipta Jaya");
+    setCustomCompany("");
+    setValidationError(null);
+  };
+
+  const handleCancelEdit = () => {
+    resetInvoiceForm();
     setShowAddForm(false);
   };
 
@@ -184,17 +191,13 @@ export default function InvoiceManager({
         );
       }
       setAlertMessage("Invoice berhasil diperbarui!");
-      setEditingInvoiceId(null);
-      setInvoiceNo("");
-      setAmount(0);
-      setDescription("");
-      setStatus("Sudah Dikirim");
+      resetInvoiceForm();
       setShowAddForm(false);
       return;
     }
 
     const newInvoice: Transaction = {
-      id: `invoice-${Date.now()}`,
+      id: `invoice-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       projectId,
       type: "Invoice",
       pic: "Finance Admin",
@@ -223,10 +226,7 @@ export default function InvoiceManager({
     setAlertMessage("Invoice berhasil dicatat!");
 
     // Reset Form fields
-    setInvoiceNo("");
-    setAmount(0);
-    setDescription("");
-    setStatus("Sudah Dikirim");
+    resetInvoiceForm();
     setShowAddForm(false);
   };
 
@@ -413,10 +413,18 @@ export default function InvoiceManager({
 
         {!isReadOnly && (
           <button
-            onClick={() => setShowAddForm(!showAddForm)}
+            onClick={() => {
+              if (showAddForm) {
+                setShowAddForm(false);
+                resetInvoiceForm();
+              } else {
+                resetInvoiceForm();
+                setShowAddForm(true);
+              }
+            }}
             className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl flex items-center justify-center gap-2 text-xs font-semibold shadow-md transition-all cursor-pointer"
           >
-            <Plus className="w-4 h-4" /> Input Invoice Baru
+            <Plus className="w-4 h-4" /> {showAddForm ? "Tutup Form" : "Input Invoice Baru"}
           </button>
         )}
       </div>
@@ -613,13 +621,7 @@ export default function InvoiceManager({
             <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
               <button
                 type="button"
-                onClick={() => {
-                  if (editingInvoiceId) {
-                    handleCancelEdit();
-                  } else {
-                    setShowAddForm(false);
-                  }
-                }}
+                onClick={handleCancelEdit}
                 className="px-4 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-100 rounded-xl transition-all cursor-pointer"
               >
                 Batalkan

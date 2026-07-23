@@ -278,6 +278,24 @@ export default function SalaryManager({
   const [alertMessage, setAlertMessage] = React.useState<string | null>(null);
   const [salaryToDelete, setSalaryToDelete] = React.useState<string | null>(null);
 
+  const resetSalaryForm = () => {
+    setEditingSalaryId(null);
+    setEmployeeName("");
+    setManualSlipNo("");
+    setCurrentItems([
+      { id: "comp-1", description: "Gaji Pokok", amount: 0, isDeduction: false },
+      { id: "comp-2", description: "Tunjangan Makan & Transport", amount: 0, isDeduction: false },
+      { id: "comp-3", description: "Uang Lembur (Overtime)", amount: 0, isDeduction: false },
+      { id: "comp-4", description: "Tunjangan Lainnya", amount: 0, isDeduction: false },
+      { id: "comp-5", description: "Potongan Gaji", amount: 0, isDeduction: true },
+    ]);
+    setDescription("");
+    setValidationError(null);
+    setCompany("CV. Mandiri Cipta Jaya");
+    setCustomCompany("");
+    setPaymentMethod("Transfer Bank");
+  };
+
   // Auto company selector based on project
   React.useEffect(() => {
     if (projectId) {
@@ -495,7 +513,7 @@ export default function SalaryManager({
     } else {
       // Create new transaction
       const newSalaryTransaction: Transaction = {
-        id: `sal-${Date.now()}`,
+        id: `sal-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
         projectId,
         type: "PetyCash", // Processed as direct spending
         category: "Gaji",
@@ -527,17 +545,7 @@ export default function SalaryManager({
     }
 
     // Reset Form fields
-    setEmployeeName("");
-    setManualSlipNo("");
-    setEditingSalaryId(null);
-    setCurrentItems([
-      { id: "comp-1", description: "Gaji Pokok", amount: 0, isDeduction: false },
-      { id: "comp-2", description: "Tunjangan Makan & Transport", amount: 0, isDeduction: false },
-      { id: "comp-3", description: "Uang Lembur (Overtime)", amount: 0, isDeduction: false },
-      { id: "comp-4", description: "Tunjangan Lainnya", amount: 0, isDeduction: false },
-      { id: "comp-5", description: "Potongan Gaji", amount: 0, isDeduction: true },
-    ]);
-    setDescription("");
+    resetSalaryForm();
     setShowAddForm(false);
   };
 
@@ -621,24 +629,13 @@ export default function SalaryManager({
             onClick={() => {
               if (showAddForm) {
                 setShowAddForm(false);
-                setValidationError(null);
-                setEditingSalaryId(null);
+                resetSalaryForm();
               } else {
-                setEditingSalaryId(null);
-                setEmployeeName("");
+                resetSalaryForm();
                 const yearMonth = date.substring(0, 7).replace("-", "");
                 const totalGajiTransactionsCount = transactions.filter(t => t.category === "Gaji").length + 1;
                 setManualSlipNo(`PAY-${yearMonth}-${String(totalGajiTransactionsCount).padStart(3, "0")}`);
-                setCurrentItems([
-                  { id: "comp-1", description: "Gaji Pokok", amount: 0, isDeduction: false },
-                  { id: "comp-2", description: "Tunjangan Makan & Transport", amount: 0, isDeduction: false },
-                  { id: "comp-3", description: "Uang Lembur (Overtime)", amount: 0, isDeduction: false },
-                  { id: "comp-4", description: "Tunjangan Lainnya", amount: 0, isDeduction: false },
-                  { id: "comp-5", description: "Potongan Gaji", amount: 0, isDeduction: true },
-                ]);
-                setDescription("");
                 setShowAddForm(true);
-                setValidationError(null);
               }
             }}
             className="bg-blue-600 hover:bg-blue-500 text-white font-extrabold text-xs px-4 py-3 rounded-xl transition-all cursor-pointer flex items-center gap-2 shadow-lg shadow-blue-500/10 min-h-[44px] shrink-0"
@@ -964,8 +961,7 @@ export default function SalaryManager({
                   type="button"
                   onClick={() => {
                     setShowAddForm(false);
-                    setValidationError(null);
-                    setEditingSalaryId(null);
+                    resetSalaryForm();
                   }}
                   className="px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded-xl transition-all cursor-pointer border border-transparent"
                 >

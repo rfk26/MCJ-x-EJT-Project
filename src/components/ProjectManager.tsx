@@ -340,6 +340,33 @@ export default function ProjectManager({
     [activities, transactions]
   );
 
+  const resetProjectForm = () => {
+    setName("");
+    setCode("");
+    setManager("");
+    setPic("");
+    setTargetCompletionDate("");
+    setExpectedProfitPercent(35);
+    setBudgetThresholdPercent(85);
+    setPpnPercent(11);
+    setPphPercent(4);
+    setCompany("CV. Mandiri Cipta Jaya");
+    setCustomCompany("");
+    setNotes("");
+    setPipingVal(0);
+    setElectricalVal(0);
+    setMechanicalVal(0);
+    setScafolderVal(0);
+    setWelderVal(0);
+    setPipingName("Piping");
+    setElectricalName("Electrical");
+    setMechanicalName("Mechanical");
+    setScafolderName("Scafolder");
+    setWelderName("Welder");
+    setSelectedPoCopy("");
+    setValidationError(null);
+  };
+
   const handleCreateProject = (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -354,7 +381,7 @@ export default function ProjectManager({
 
     // Create a new project - values will be populated from PO Management
     const newProject: Project = {
-      id: `proj-${Date.now()}`,
+      id: `proj-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       name,
       code,
       manager,
@@ -403,29 +430,7 @@ export default function ProjectManager({
     setAlertMessage(`Proyek "${name}" berhasil didaftarkan. Hubungkan dengan PO di tab Manajemen PO untuk menetapkan nominal kontrak dasar.`);
 
     // Reset Form
-    setName("");
-    setCode("");
-    setManager("");
-    setPic("");
-    setTargetCompletionDate("");
-    setExpectedProfitPercent(35);
-    setBudgetThresholdPercent(85);
-    setPpnPercent(11);
-    setPphPercent(4);
-    setCompany("CV. Mandiri Cipta Jaya");
-    setCustomCompany("");
-    setNotes("");
-    setPipingVal(0);
-    setElectricalVal(0);
-    setMechanicalVal(0);
-    setScafolderVal(0);
-    setWelderVal(0);
-    setPipingName("Piping");
-    setElectricalName("Electrical");
-    setMechanicalName("Mechanical");
-    setScafolderName("Scafolder");
-    setWelderName("Welder");
-    setSelectedPoCopy("");
+    resetProjectForm();
     setShowAddForm(false);
   };
 
@@ -621,10 +626,18 @@ export default function ProjectManager({
 
         {!isReadOnly && (
           <button
-            onClick={() => setShowAddForm(!showAddForm)}
+            onClick={() => {
+              if (showAddForm) {
+                setShowAddForm(false);
+                resetProjectForm();
+              } else {
+                resetProjectForm();
+                setShowAddForm(true);
+              }
+            }}
             className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl flex items-center justify-center gap-2 text-xs font-semibold shadow-md transition-all cursor-pointer"
           >
-            <Plus className="w-4 h-4" /> Daftarkan Proyek Baru
+            <Plus className="w-4 h-4" /> {showAddForm ? "Tutup Form" : "Daftarkan Proyek Baru"}
           </button>
         )}
       </div>
@@ -812,7 +825,10 @@ export default function ProjectManager({
             <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
               <button
                 type="button"
-                onClick={() => setShowAddForm(false)}
+                onClick={() => {
+                  setShowAddForm(false);
+                  resetProjectForm();
+                }}
                 className="border border-gray-200 text-gray-600 px-4 py-2 text-xs font-semibold rounded-xl hover:bg-gray-50 transition-all cursor-pointer"
               >
                 Batal

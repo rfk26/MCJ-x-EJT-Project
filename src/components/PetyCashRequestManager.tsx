@@ -63,6 +63,7 @@ export const printVoucher = (tx: Transaction, project: Project | undefined, comp
     ? tx.items.map((item, index) => `
         <tr style="border-bottom: 1px solid #ddd;">
           <td style="padding: 8px; text-align: center;">${index + 1}</td>
+          <td style="padding: 8px; text-align: center; font-family: monospace;">${item.date || tx.date}</td>
           <td style="padding: 8px;">${item.description}</td>
           <td style="padding: 8px; text-align: center;">${item.category}</td>
           <td style="padding: 8px; text-align: right; font-weight: bold;">${formatIDRPrint(item.amount)}</td>
@@ -71,6 +72,7 @@ export const printVoucher = (tx: Transaction, project: Project | undefined, comp
     : `
         <tr style="border-bottom: 1px solid #ddd;">
           <td style="padding: 8px; text-align: center;">1</td>
+          <td style="padding: 8px; text-align: center; font-family: monospace;">${tx.date}</td>
           <td style="padding: 8px;">${tx.description}</td>
           <td style="padding: 8px; text-align: center;">${tx.category}</td>
           <td style="padding: 8px; text-align: right; font-weight: bold;">${formatIDRPrint(tx.amount)}</td>
@@ -249,16 +251,17 @@ export const printVoucher = (tx: Transaction, project: Project | undefined, comp
       <table class="items-table">
         <thead>
           <tr>
-            <th style="width: 50px; text-align: center;">No</th>
+            <th style="width: 40px; text-align: center;">No</th>
+            <th style="width: 100px; text-align: center;">Tanggal</th>
             <th style="text-align: left;">Deskripsi Barang / Keperluan</th>
-            <th style="width: 150px; text-align: center;">Kategori Anggaran</th>
-            <th style="width: 150px; text-align: right;">Jumlah Nominal</th>
+            <th style="width: 140px; text-align: center;">Kategori Anggaran</th>
+            <th style="width: 140px; text-align: right;">Jumlah Nominal</th>
           </tr>
         </thead>
         <tbody>
           ${itemsHTML}
           <tr class="total-row">
-            <td colspan="3" style="text-align: right; padding: 12px; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px;">TOTAL KESELURUHAN:</td>
+            <td colspan="4" style="text-align: right; padding: 12px; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px;">TOTAL KESELURUHAN:</td>
             <td style="text-align: right; padding: 12px; color: #2d3748; font-size: 14px;">${formatIDRPrint(tx.amount)}</td>
           </tr>
         </tbody>
@@ -596,7 +599,7 @@ export default function PetyCashRequestManager({
       }
     } else {
       const newRequest: Transaction = {
-        id: `req-${Date.now()}`,
+        id: `req-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
         projectId,
         type: "PetyCashRequest",
         pic,
@@ -627,12 +630,7 @@ export default function PetyCashRequestManager({
     }
 
     // Reset Form
-    setPic("");
-    setCurrentItems([]);
-    setCompany("CV. Mandiri Cipta Jaya");
-    setCustomCompany("");
-    setEditingRequestId(null);
-    setIsManualRequestNo(false);
+    resetRequestForm();
     setShowAddForm(false);
   };
 
@@ -662,13 +660,25 @@ export default function PetyCashRequestManager({
     }
   };
 
-  const handleCancelEdit = () => {
+  const resetRequestForm = () => {
     setEditingRequestId(null);
     setPic("");
+    setRequestNo("");
+    setIsManualRequestNo(false);
+    setStatus("Belum Proses");
+    setPaymentMethod("Tunai");
     setCurrentItems([]);
     setCompany("CV. Mandiri Cipta Jaya");
     setCustomCompany("");
-    setIsManualRequestNo(false);
+    setValidationError(null);
+    setItemDesc("");
+    setItemAmt(0);
+    setCustomCatName("");
+    setItemCat("Consumable");
+  };
+
+  const handleCancelEdit = () => {
+    resetRequestForm();
     setShowAddForm(false);
   };
 
@@ -955,10 +965,18 @@ export default function PetyCashRequestManager({
 
         {!isReadOnly && (
           <button
-            onClick={() => setShowAddForm(!showAddForm)}
+            onClick={() => {
+              if (showAddForm) {
+                setShowAddForm(false);
+                resetRequestForm();
+              } else {
+                resetRequestForm();
+                setShowAddForm(true);
+              }
+            }}
             className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl flex items-center justify-center gap-2 text-xs font-semibold shadow-md transition-all cursor-pointer"
           >
-            <Plus className="w-4 h-4" /> Ajukan Petty Cash Baru
+            <Plus className="w-4 h-4" /> {showAddForm ? "Tutup Form" : "Ajukan Petty Cash Baru"}
           </button>
         )}
       </div>
@@ -1325,10 +1343,7 @@ export default function PetyCashRequestManager({
             <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
               <button
                 type="button"
-                onClick={editingRequestId ? handleCancelEdit : () => {
-                  setShowAddForm(false);
-                  setCurrentItems([]);
-                }}
+                onClick={handleCancelEdit}
                 className="px-4 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-100 rounded-xl transition-all cursor-pointer"
               >
                 {editingRequestId ? "Batalkan Ubah" : "Batalkan"}

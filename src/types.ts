@@ -65,6 +65,7 @@ export interface PetyCashItem {
   description: string;
   category: Category;
   amount: number;
+  date?: string;
 }
 
 export interface Transaction {

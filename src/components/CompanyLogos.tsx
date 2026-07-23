@@ -211,30 +211,43 @@ export const LogoEJT: React.FC<LogoProps> = ({ className = "", size = "100%" }) 
 /**
  * Unified double corporate logo layout (MCJ and EJT side by side inside a clean frame)
  */
-export const UnifiedLogo: React.FC<LogoProps & { withText?: boolean; textClass?: string }> = ({
+export const UnifiedLogo: React.FC<LogoProps & { withText?: boolean; textClass?: string; customLogo?: string | null; customLogoEJT?: string | null }> = ({
   className = "",
   size = 40,
   withText = true,
-  textClass = "text-white"
+  textClass = "text-white",
+  customLogo,
+  customLogoEJT,
 }) => {
+  const logoMain = customLogo !== undefined ? customLogo : (typeof localStorage !== "undefined" ? localStorage.getItem("mcj_company_logo") : null);
+  const logoEJT = customLogoEJT !== undefined ? customLogoEJT : (typeof localStorage !== "undefined" ? localStorage.getItem("mcj_company_logo_ejt") : null);
+
   return (
     <div className={`flex items-center gap-3.5 ${className}`}>
       {/* Logos Container */}
       <div className="flex items-center -space-x-2 bg-slate-950/60 p-2 rounded-2xl border border-slate-800/80 shadow-inner">
         {/* MCJ logo container */}
         <div 
-          className="bg-white p-1 rounded-xl shadow-md flex items-center justify-center transition-transform hover:scale-105"
+          className="bg-white p-1 rounded-xl shadow-md flex items-center justify-center transition-transform hover:scale-105 overflow-hidden"
           style={{ width: `${size}px`, height: `${size}px` }}
         >
-          <LogoMCJ size="100%" />
+          {logoMain ? (
+            <img src={logoMain} alt="Logo MCJ" className="max-w-full max-h-full object-contain" />
+          ) : (
+            <LogoMCJ size="100%" />
+          )}
         </div>
         
         {/* EJT logo container */}
         <div 
-          className="bg-white p-1 rounded-xl shadow-md flex items-center justify-center transition-transform hover:scale-105 border border-slate-100"
+          className="bg-white p-1 rounded-xl shadow-md flex items-center justify-center transition-transform hover:scale-105 border border-slate-100 overflow-hidden"
           style={{ width: `${size}px`, height: `${size}px` }}
         >
-          <LogoEJT size="100%" />
+          {logoEJT ? (
+            <img src={logoEJT} alt="Logo EJT" className="max-w-full max-h-full object-contain" />
+          ) : (
+            <LogoEJT size="100%" />
+          )}
         </div>
       </div>
 
